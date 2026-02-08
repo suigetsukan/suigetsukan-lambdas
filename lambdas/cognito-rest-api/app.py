@@ -19,7 +19,13 @@ from common.constants import (
     DEFAULT_REGION,
     HTTP_BAD_REQUEST,
     HTTP_OK,
+    HTTP_UNAUTHORIZED,
 )
+
+
+def _cors_origin():
+    """CORS origin from env; restrict via CORS_ALLOWED_ORIGIN for production."""
+    return os.environ.get("CORS_ALLOWED_ORIGIN", CORS_ORIGIN_ALL)
 
 
 def _error_response(status_code, message):
@@ -27,12 +33,22 @@ def _error_response(status_code, message):
     return {
         "statusCode": status_code,
         "headers": {
-            "Access-Control-Allow-Origin": CORS_ORIGIN_ALL,
+            "Access-Control-Allow-Origin": _cors_origin(),
             "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
             "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
         },
         "body": json.dumps({"error": message}),
     }
+
+
+def _require_authorizer(event):
+    """Require API Gateway Cognito authorizer; return 401 if missing."""
+    if not event.get("requestContext", {}).get("authorizer"):
+        return _error_response(
+            HTTP_UNAUTHORIZED,
+            "Unauthorized: API Gateway must use Cognito authorizer",
+        )
+    return None
 
 
 def compile_users(resp):
@@ -398,12 +414,15 @@ def handler(event, context):
         return {
             "statusCode": 204,
             "headers": {
-                "Access-Control-Allow-Origin": CORS_ORIGIN_ALL,
+                "Access-Control-Allow-Origin": _cors_origin(),
                 "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
                 "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
             },
             "body": "",
         }
+    auth_err = _require_authorizer(event)
+    if auth_err:
+        return auth_err
     if event["httpMethod"] == "GET":
         if event["path"] == "/list":
             body = list_handler(client, USER_POOL_ID)
@@ -482,7 +501,7 @@ def handler(event, context):
     return {
         "statusCode": HTTP_OK,
         "headers": {
-            "Access-Control-Allow-Origin": CORS_ORIGIN_ALL,
+            "Access-Control-Allow-Origin": _cors_origin(),
             "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
             "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
         },

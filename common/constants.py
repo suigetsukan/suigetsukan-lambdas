@@ -13,9 +13,10 @@ DEFAULT_REGION = "us-west-1"
 # ---------------------------------------------------------------------------
 HTTP_OK = 200
 HTTP_BAD_REQUEST = 400
+HTTP_UNAUTHORIZED = 401
 
 # ---------------------------------------------------------------------------
-# CORS
+# CORS (use CORS_ALLOWED_ORIGIN env var to restrict; default allows all)
 # ---------------------------------------------------------------------------
 CORS_ORIGIN_ALL = "*"
 CORS_HEADERS_ALL = "*"

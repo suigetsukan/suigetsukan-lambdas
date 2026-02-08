@@ -80,12 +80,14 @@ def load_config(lambda_dir: Path) -> dict:
         return {}
 
 
-def build_env_vars(config: dict) -> dict:
+def build_env_vars(config: dict, lambda_name: str) -> dict:
     env_vars = {}
     config_env = config.get("env_vars", {})
+    optional_keys = {k.upper().replace("-", "_") for k in config.get("optional_env_vars", [])}
     if not config_env:
         print("  no env_vars – skipping environment variables")
         return {}
+    missing: list[str] = []
     for key in config_env:
         norm_key = key.upper().replace("-", "_")
         if norm_key in RESERVED_ENV_VARS:
@@ -93,8 +95,14 @@ def build_env_vars(config: dict) -> dict:
             continue
         value = os.getenv(norm_key, "")
         if not value:
-            print(f"  Warning: secret {norm_key} not set – using empty string")
+            if norm_key not in optional_keys:
+                missing.append(norm_key)
+            continue
         env_vars[norm_key] = value
+    if missing:
+        print(f"  ERROR: Required secrets not set for {lambda_name}: {', '.join(missing)}")
+        print("  Add these to GitHub repository secrets (Settings → Secrets → Actions)")
+        sys.exit(1)
     return env_vars
 
 
@@ -163,7 +171,7 @@ def deploy_lambda(lambda_dir: Path):
         if common_dest.exists():
             shutil.rmtree(common_dest)
 
-        env_vars = build_env_vars(config)
+        env_vars = build_env_vars(config, lambda_dir.name)
         region = os.getenv("AWS_REGION", "us-west-1")
         lambda_client = boto3.client("lambda", region_name=region)
         function_arn = (

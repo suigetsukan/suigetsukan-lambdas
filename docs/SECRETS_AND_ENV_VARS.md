@@ -30,6 +30,7 @@ Add these to your GitHub repository secrets (Settings → Secrets and variables 
 | `AWS_DDB_AIKIDO_TABLE_NAME` | DynamoDB table for Aikido curriculum | file-name-decipher |
 | `AWS_DDB_BATTODO_TABLE_NAME` | DynamoDB table for Battodo curriculum | file-name-decipher |
 | `AWS_DDB_DANZAN_RYU_TABLE_NAME` | DynamoDB table for Danzan Ryu curriculum | file-name-decipher |
+| `CORS_ALLOWED_ORIGIN` | Restrict CORS origin (optional; default `*`) | cognito-rest-api, billing-rest-api |
 
 ---
 

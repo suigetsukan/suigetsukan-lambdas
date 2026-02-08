@@ -163,6 +163,7 @@ jobs:
           AWS_DDB_AIKIDO_TABLE_NAME: ${{ secrets.AWS_DDB_AIKIDO_TABLE_NAME }}
           AWS_DDB_BATTODO_TABLE_NAME: ${{ secrets.AWS_DDB_BATTODO_TABLE_NAME }}
           AWS_DDB_DANZAN_RYU_TABLE_NAME: ${{ secrets.AWS_DDB_DANZAN_RYU_TABLE_NAME }}
+          CORS_ALLOWED_ORIGIN: ${{ secrets.CORS_ALLOWED_ORIGIN }}
         run: python .github/scripts/deploy_lambdas.py
 
       - name: Setup Lambda Triggers

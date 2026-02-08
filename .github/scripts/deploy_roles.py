@@ -64,28 +64,26 @@ def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
             iam.attach_role_policy(RoleName=role_name, PolicyArn=basic_policy_arn)
             print(f"  Attached {basic_policy_arn}")
 
-            app_py = lambda_dir / "app.py"
-            if app_py.exists():
-                code = app_py.read_text()
-                services = set(re.findall(r'boto3\.client\(["\']([^"\']+)["\']\)', code))
-                policy_map = {
-                    "ce": "arn:aws:iam::aws:policy/AWSCostExplorerReadOnlyAccess",
-                    "cognito-idp": "arn:aws:iam::aws:policy/AmazonCognitoPowerUser",
-                    "dynamodb": "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
-                    "iot": "arn:aws:iam::aws:policy/AWSIoTFullAccess",
-                    "iot-data": "arn:aws:iam::aws:policy/AWSIoTDataAccess",
-                    "s3": "arn:aws:iam::aws:policy/AmazonS3FullAccess",
-                    "ses": "arn:aws:iam::aws:policy/AmazonSESFullAccess",
-                    "sns": "arn:aws:iam::aws:policy/AmazonSNSFullAccess",
-                    "sqs": "arn:aws:iam::aws:policy/AmazonSQSFullAccess",
-                }
-                # Also detect boto3.resource("service") - uses same policy as client
-                resources = set(re.findall(r'boto3\.resource\(["\']([^"\']+)["\']\)', code))
-                services = services | resources
-                for svc in services:
-                    if svc in policy_map:
-                        iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_map[svc])
-                        print(f"  Attached policy for {svc}: {policy_map[svc]}")
+            policy_map = {
+                "ce": "arn:aws:iam::aws:policy/AWSCostExplorerReadOnlyAccess",
+                "cognito-idp": "arn:aws:iam::aws:policy/AmazonCognitoPowerUser",
+                "dynamodb": "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+                "iot": "arn:aws:iam::aws:policy/AWSIoTFullAccess",
+                "iot-data": "arn:aws:iam::aws:policy/AWSIoTDataAccess",
+                "s3": "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+                "ses": "arn:aws:iam::aws:policy/AmazonSESFullAccess",
+                "sns": "arn:aws:iam::aws:policy/AmazonSNSFullAccess",
+                "sqs": "arn:aws:iam::aws:policy/AmazonSQSFullAccess",
+            }
+            services: set[str] = set()
+            for py_file in lambda_dir.glob("*.py"):
+                code = py_file.read_text()
+                services.update(re.findall(r'boto3\.client\(["\']([^"\']+)["\']\)', code))
+                services.update(re.findall(r'boto3\.resource\(["\']([^"\']+)["\']\)', code))
+            for svc in services:
+                if svc in policy_map:
+                    iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_map[svc])
+                    print(f"  Attached policy for {svc}: {policy_map[svc]}")
 
             time.sleep(30)
         else:

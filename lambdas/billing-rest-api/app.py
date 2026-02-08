@@ -19,7 +19,33 @@ from common.constants import (
     CORS_ORIGIN_ALL,
     DEFAULT_REGION,
     HTTP_OK,
+    HTTP_UNAUTHORIZED,
 )
+
+
+def _cors_origin():
+    """CORS origin from env; restrict via CORS_ALLOWED_ORIGIN for production."""
+    return os.environ.get("CORS_ALLOWED_ORIGIN", CORS_ORIGIN_ALL)
+
+
+def _require_authorizer(event):
+    """Require API Gateway authorizer when event looks like API Gateway request."""
+    http_method = event.get("httpMethod")
+    if (
+        http_method
+        and http_method != "OPTIONS"
+        and not event.get("requestContext", {}).get("authorizer")
+    ):
+        return {
+            "statusCode": HTTP_UNAUTHORIZED,
+            "headers": {
+                "Access-Control-Allow-Origin": _cors_origin(),
+                "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
+                "Access-Control-Allow-Methods": CORS_METHODS_GET_OPTIONS,
+            },
+            "body": json.dumps({"error": "Unauthorized: API Gateway must use authorizer"}),
+        }
+    return None
 
 
 def set_leading_zero(number):
@@ -131,6 +157,9 @@ def lambda_handler(event, context):
     :rtype: dict
     """
     print(event)
+    auth_err = _require_authorizer(event)
+    if auth_err:
+        return auth_err
     region = os.environ.get("AWS_REGION", DEFAULT_REGION)
     client = boto3.client("ce", region_name=region)
 
@@ -146,7 +175,7 @@ def lambda_handler(event, context):
     return {
         "statusCode": HTTP_OK,
         "headers": {
-            "Access-Control-Allow-Origin": CORS_ORIGIN_ALL,
+            "Access-Control-Allow-Origin": _cors_origin(),
             "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
             "Access-Control-Allow-Methods": CORS_METHODS_GET_OPTIONS,
         },
