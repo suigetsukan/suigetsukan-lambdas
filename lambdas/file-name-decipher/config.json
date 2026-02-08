@@ -1,0 +1,13 @@
+{
+  "function_name_suffix": "file-name-decipher",
+  "function_name": "suigetsukan-file-name-decipher",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 300,
+  "memory_size": 256,
+  "env_vars": {"AWS_DDB_AIKIDO_TABLE_NAME": "placeholder", "AWS_DDB_BATTODO_TABLE_NAME": "placeholder", "AWS_DDB_DANZAN_RYU_TABLE_NAME": "placeholder"},
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "role_name": "suigetsukan-file-name-decipher-role",
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"]
+}

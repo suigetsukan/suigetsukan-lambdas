@@ -1,0 +1,11 @@
+*.pyc
+__pycache__/
+*.zip
+.idea/
+.env
+*.log
+.venv/
+
+# Local secrets tooling (do not commit)
+scripts/set_org_secrets.sh
+scripts/org-secrets.env

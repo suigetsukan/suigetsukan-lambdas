@@ -1,0 +1,37 @@
+name: Lint and Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          pip install boto3
+
+      - name: Ruff (lint)
+        run: ruff check . --fix
+
+      - name: Ruff (format check)
+        run: ruff format --check .
+
+      - name: Mypy (type check)
+        run: mypy .
+
+      - name: Bandit (security)
+        run: bandit -r lambdas common .github/scripts -ll -c pyproject.toml
+
+      - name: Pytest
+        run: pytest tests/ -v

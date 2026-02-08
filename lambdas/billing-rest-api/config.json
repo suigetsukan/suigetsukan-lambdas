@@ -1,0 +1,13 @@
+{
+  "function_name_suffix": "billing-rest-api",
+  "function_name": "suigetsukan-billing-rest-api",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 300,
+  "memory_size": 256,
+  "env_vars": {"AWS_REGION": "placeholder"},
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "role_name": "suigetsukan-billing-rest-api-role",
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"]
+}

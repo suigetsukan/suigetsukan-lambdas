@@ -1,0 +1,33 @@
+# Pre-commit hooks for MISRA-inspired coding standards
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy .
+        language: python
+        additional_dependencies: [mypy]
+        pass_filenames: false
+
+      - id: bandit
+        name: bandit
+        entry: bandit -r lambdas common .github/scripts -ll -c pyproject.toml
+        language: python
+        additional_dependencies: [bandit]
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest
+        entry: pytest tests/ -v --tb=short
+        language: python
+        additional_dependencies: [pytest, boto3]
+        pass_filenames: false

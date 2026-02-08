@@ -1,0 +1,172 @@
+name: Deploy Lambdas (Smart + Validated)
+
+on:
+  push:
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_lambdas: ${{ steps.extract.outputs.changed_lambdas }}
+      config_changed: ${{ steps.flags.outputs.config_changed }}
+      deploy_all: ${{ steps.flags.outputs.deploy_all }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          list-files: shell
+          base: ${{ github.ref_name }}
+          filters: |
+            lambdas:
+              - 'lambdas/**'
+            common:
+              - 'common/**'
+            layers:
+              - 'layers/**'
+            critical:
+              - '.github/schemas/lambda-config.schema.json'
+              - '.github/scripts/deploy_lambdas.py'
+              - '.github/scripts/extract_changed_lambdas.py'
+              - '.github/scripts/set_flags.py'
+              - '.github/scripts/validate_lambda_configs.py'
+              - '.github/workflows/deploy.yml'
+
+      - name: Extract changed Lambda names
+        id: extract
+        env:
+          CHANGED_FILES: ${{ steps.filter.outputs.lambdas_files }}
+        run: python .github/scripts/extract_changed_lambdas.py >> $GITHUB_OUTPUT
+
+      - name: Check commit message for deploy_all
+        id: commit_check
+        run: |
+          if echo "${{ github.event.head_commit.message }}" | grep -iq "deploy_all"; then
+            echo "deploy_all_commit=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_all_commit=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set flags
+        id: flags
+        env:
+          LAMBDAS_FILES: ${{ steps.filter.outputs.lambdas_files }}
+          COMMON_FILES: ${{ steps.filter.outputs.common_files }}
+          LAYERS_FILES: ${{ steps.filter.outputs.layers_files }}
+          CRITICAL_FILES: ${{ steps.filter.outputs.critical_files }}
+          DEPLOY_ALL_COMMIT: ${{ steps.commit_check.outputs.deploy_all_commit }}
+        run: python .github/scripts/set_flags.py >> $GITHUB_OUTPUT
+
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          pip install boto3
+
+      - name: Ruff (lint)
+        run: ruff check . --fix
+
+      - name: Ruff (format check)
+        run: ruff format --check .
+
+      - name: Mypy (type check)
+        run: mypy .
+
+      - name: Bandit (security)
+        run: bandit -r lambdas common .github/scripts -ll -c pyproject.toml
+
+      - name: Pytest
+        run: pytest tests/ -v
+
+  validate-config:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install jsonschema
+        run: pip install jsonschema
+
+      - name: Validate
+        run: python .github/scripts/validate_lambda_configs.py
+
+  deploy:
+    needs: [ detect-changes, validate-config, lint-and-test ]
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install boto3
+        run: pip install boto3
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy Lambda Layers
+        run: python .github/scripts/deploy_layers.py
+
+      - name: Deploy Lambda IAM Roles
+        env:
+          EXECUTION_ROLE: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/suigetsukan-lambda-execution-role
+          CHANGED_LAMBDAS: ${{ needs.detect-changes.outputs.changed_lambdas }}
+          DEPLOY_ALL: ${{ needs.detect-changes.outputs.deploy_all }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: python .github/scripts/deploy_roles.py
+
+      - name: Deploy Lambdas
+        env:
+          EXECUTION_ROLE: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/suigetsukan-lambda-execution-role
+          CHANGED_LAMBDAS: ${{ needs.detect-changes.outputs.changed_lambdas }}
+          DEPLOY_ALL: ${{ needs.detect-changes.outputs.deploy_all }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          # Lambda-specific env vars (from config.json; use same names as secrets)
+          AWS_SES_SOURCE_EMAIL: ${{ secrets.AWS_SES_SOURCE_EMAIL }}
+          AWS_COGNITO_USER_POOL_ID: ${{ secrets.AWS_COGNITO_USER_POOL_ID }}
+          AWS_DDB_AIKIDO_TABLE_NAME: ${{ secrets.AWS_DDB_AIKIDO_TABLE_NAME }}
+          AWS_DDB_BATTODO_TABLE_NAME: ${{ secrets.AWS_DDB_BATTODO_TABLE_NAME }}
+          AWS_DDB_DANZAN_RYU_TABLE_NAME: ${{ secrets.AWS_DDB_DANZAN_RYU_TABLE_NAME }}
+        run: python .github/scripts/deploy_lambdas.py
+
+      - name: Setup Lambda Triggers
+        env:
+          CHANGED_LAMBDAS: ${{ needs.detect-changes.outputs.changed_lambdas }}
+          DEPLOY_ALL: ${{ needs.detect-changes.outputs.deploy_all }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: python .github/scripts/setup_triggers.py

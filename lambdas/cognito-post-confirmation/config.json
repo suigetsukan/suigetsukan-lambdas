@@ -1,0 +1,13 @@
+{
+  "function_name_suffix": "cognito-post-confirmation",
+  "function_name": "suigetsukan-cognito-post-confirmation",
+  "handler": "app.handler",
+  "runtime": "python3.12",
+  "timeout": 300,
+  "memory_size": 256,
+  "env_vars": {"AWS_REGION": "placeholder", "AWS_SES_SOURCE_EMAIL": "placeholder"},
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "role_name": "suigetsukan-cognito-post-confirmation-role",
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"]
+}
