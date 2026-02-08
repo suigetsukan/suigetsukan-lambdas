@@ -101,6 +101,7 @@ def build_env_vars(config: dict) -> dict:
 def deploy_lambda(lambda_dir: Path):
     print(f"\n{'=' * 60}\nDeploying: {lambda_dir.name}\n{'=' * 60}")
     original_cwd = Path.cwd()
+    zip_path = None
     os.chdir(lambda_dir)
     try:
         config = load_config(lambda_dir)
@@ -163,8 +164,8 @@ def deploy_lambda(lambda_dir: Path):
             shutil.rmtree(common_dest)
 
         env_vars = build_env_vars(config)
-        lambda_client = boto3.client("lambda")
         region = os.getenv("AWS_REGION", "us-west-1")
+        lambda_client = boto3.client("lambda", region_name=region)
         function_arn = (
             f"arn:aws:lambda:{region}:{os.getenv('AWS_ACCOUNT_ID')}:function:{function_name}"
         )
@@ -218,10 +219,11 @@ def deploy_lambda(lambda_dir: Path):
                 )
             else:
                 raise
-        zip_path.unlink()
         print(f"  Done: {function_name}")
     finally:
         os.chdir(original_cwd)
+        if zip_path is not None and zip_path.exists():
+            zip_path.unlink()
 
 
 def main():

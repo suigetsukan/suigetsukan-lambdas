@@ -74,6 +74,8 @@ def handle_aikido(hls_url):
     my_ddb_table = boto3.resource("dynamodb").Table(DDB_AIKIDO_TABLE)
     stub = utils.get_file_stub(hls_url)
     parts = re.findall(r"^a([0-9]{2}).*$", stub)
+    if not parts:
+        raise RuntimeError(f"Invalid aikido stub pattern: {stub}")
     scroll_name = AIKIDO_SCROLL_LOOKUP[int(parts[0])]  # use int to remove leading zeros
     print(f"scroll_name: {scroll_name}")
     response = update_ddb(scroll_name, stub, my_ddb_table, hls_url)

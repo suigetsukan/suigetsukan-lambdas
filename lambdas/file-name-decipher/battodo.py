@@ -32,6 +32,12 @@ from common.constants import DDB_INDEX_NAME, DDB_ITEMS_KEY, DDB_MAP_KEY, DDB_VAR
 DDB_BATTODO_TABLE = os.environ["AWS_DDB_BATTODO_TABLE_NAME"]
 
 
+def _require_parts(parts, file_stem, scroll):
+    """Raise if parts is empty (regex did not match)."""
+    if not parts:
+        raise RuntimeError(f"Invalid Battodo file stem for {scroll}: {file_stem}")
+
+
 def get_battodo_scroll_name(scroll_char):
     """
     Identify the scroll we are processing by using a single character
@@ -52,6 +58,7 @@ def handle_suburi_shodan_uchi_waza(file_stem, json_data):
     :return: Offset in the json data
     """
     parts = re.findall(r"^c([0-9]{2})([a-y]{1})$", file_stem)
+    _require_parts(parts, file_stem, "shodan_uchi_waza")
     section_number = str(int(parts[0][0]))  # remove the leading 0
     return utils.find_one_datapoint_item_offset("Number", section_number, json_data)
 
@@ -65,6 +72,7 @@ def handle_suburi_sandan_uchi_waza(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^f([0-9]{2})([a-y]{1})$", file_stem)
+    _require_parts(parts, file_stem, "sandan_uchi_waza")
     section_number = str(int(parts[0][0]))  # remove the leading 0
     return utils.find_one_datapoint_item_offset("Number", section_number, json_data)
 
@@ -97,6 +105,7 @@ def handle_suburi_sandan_sabaki(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^g([a-z]{1})([a-z]{1})([a-y]{1})$", file_stem)
+    _require_parts(parts, file_stem, "sandan_sabaki")
     cut_type = lookup_suburi_sandan_sabaki_cut_type(parts[0][0])
     footwork_type = lookup_suburi_sandan_sabaki_footwork_type(parts[0][1])
     return utils.find_two_datapoints_item_offset(
@@ -113,6 +122,7 @@ def handle_suburi_sayu_giri(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^e([0-9]{2})([a-y]{1})$", file_stem)
+    _require_parts(parts, file_stem, "sayu_giri")
     section_number = str(int(parts[0][0]))  # remove the leading 0
     return utils.find_one_datapoint_item_offset("Number", section_number, json_data)
 
@@ -145,6 +155,7 @@ def handle_kumitachi_shodan_no_waza(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^d([0-9]{2})([a-z])[a-y]$", file_stem)
+    _require_parts(parts, file_stem, "shodan_no_waza")
     set_number = str(int(parts[0][0]))  # remove the leading 0
     defense = lookup_kumitachi_shodan_no_waza_defense(parts[0][1])
     return utils.find_two_datapoints_item_offset("Set", set_number, "Name", defense, json_data)
@@ -158,6 +169,7 @@ def handle_kumitachi_sandan_no_waza_set_one(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^h([0-9]{2}).*$", file_stem)
+    _require_parts(parts, file_stem, "sandan_no_waza_set_one")
     set_number = str(int(parts[0]))  # remove the leading 0
     return utils.find_one_datapoint_item_offset("Number", set_number, json_data)
 
@@ -180,6 +192,7 @@ def handle_kumitachi_sandan_no_waza_set_two(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^h([0-9]{2})([a-z]{1})([a-z]{1})[a-z]{1}$", file_stem)
+    _require_parts(parts, file_stem, "sandan_no_waza_set_two")
     set_number = str(int(parts[0][0]))  # remove the leading 0
     technique = lookup_kumitachi_sandan_no_waza_technique(parts[0][1])
     level = lookup_kumitachi_level(parts[0][2])
@@ -197,6 +210,7 @@ def handle_kumitachi_sandan_no_waza(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^h([0-9]{2}).*$", file_stem)
+    _require_parts(parts, file_stem, "sandan_no_waza")
     set_number = parts[0]
     if set_number == "01":
         offset = handle_kumitachi_sandan_no_waza_set_one(file_stem, json_data)
@@ -226,6 +240,7 @@ def handle_kumitachi_randori_okuden(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^i([0-9]{2})([a-z]{1})[a-z]{1}$", file_stem)
+    _require_parts(parts, file_stem, "randori_okuden")
     set_number = str(int(parts[0][0]))  # remove the leading 0
     technique = lookup_kumitachi_randori_okuden_technique(parts[0][1])
     return utils.find_two_datapoints_item_offset("Set", set_number, "Name", technique, json_data)
@@ -260,6 +275,7 @@ def handle_kumitachi_nidan_no_waza(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^j([0-9]{2})([a-z])([a-z])[a-y]$", file_stem)
+    _require_parts(parts, file_stem, "nidan_no_waza")
     set_number = str(int(parts[0][0]))  # remove the leading 0
     technique_name = lookup_kumitachi_nidan_no_waza_technique(parts[0][1])
     if set_number == "1" and technique_name == "Tsuki":
@@ -294,6 +310,7 @@ def handle_kata(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^k([0-9]{2})[a-z]$", file_stem)
+    _require_parts(parts, file_stem, "kata")
     kata = lookup_kata_name(parts[0])
     return utils.find_one_datapoint_item_offset("Name", kata, json_data)
 
@@ -326,6 +343,7 @@ def handle_battoho(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^l([0-9]{2})([0-9]{2})[a-z]$", file_stem)
+    _require_parts(parts, file_stem, "battoho")
     technique = lookup_kata_technique(parts[0][0])
     level = lookup_kata_battoho_level(parts[0][1])
     return utils.find_two_datapoints_item_offset("Level", level, "Name", technique, json_data)
@@ -350,6 +368,7 @@ def handle_toyama_ryu(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^a([0-9]{2})([0-9]{2})[a-z]$", file_stem)
+    _require_parts(parts, file_stem, "toyama_ryu")
     technique = lookup_kata_technique(parts[0][0])
     art = lookup_kata_toyama_ryu_level(parts[0][1])
     return utils.find_two_datapoints_item_offset("Art", art, "Name", technique, json_data)
@@ -385,6 +404,7 @@ def handle_tameshigiri(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^b([0-9]{2})([0-9]{2})[a-z]$", file_stem)
+    _require_parts(parts, file_stem, "tameshigiri")
     rank = lookup_tameshigiri_rank(parts[0][0])
     technique_number = int(parts[0][1])
     technique = lookup_tameshigiri_technique(rank, technique_number)
@@ -464,6 +484,7 @@ def handle_formalities(file_stem, json_data):
     :return: The offset into the json data
     """
     parts = re.findall(r"^m([0-9]{2})[a-z]$", file_stem)
+    _require_parts(parts, file_stem, "formalities")
     technique_number = str(int(parts[0]))
     return utils.find_one_datapoint_item_offset("Number", technique_number, json_data)
 
@@ -483,9 +504,9 @@ def pick_battodo_scroll_handler(scroll, file_stem, json_data):
         offset = handle_kumitachi_scroll(scroll, file_stem, json_data)
     elif scroll in ("kata", "battoho", "toyama_ryu"):
         offset = handle_kata_scroll(scroll, file_stem, json_data)
-    elif scroll in "tameshigiri":
+    elif scroll == "tameshigiri":
         offset = handle_tameshigiri(file_stem, json_data)
-    elif scroll in "formalities":
+    elif scroll == "formalities":
         offset = handle_formalities(file_stem, json_data)
     else:
         raise RuntimeError(f"Invalid Battodo scroll: {scroll}")
@@ -529,9 +550,10 @@ def handle_battodo(hls_url):
     """
     my_ddb_table = boto3.resource("dynamodb").Table(DDB_BATTODO_TABLE)
     stub = utils.get_file_stub(hls_url)
-    stu = utils.remove_char(stub, 0)
-    scroll_name = get_battodo_scroll_name(stu[0])
+    if not stub:
+        raise RuntimeError("Invalid battodo URL: no file stub")
+    scroll_name = get_battodo_scroll_name(stub[0])
     print(f"scroll_name: {scroll_name}")
-    response = update_ddb(scroll_name, stu, my_ddb_table, hls_url)
+    response = update_ddb(scroll_name, stub, my_ddb_table, hls_url)
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("Failed to update the database")

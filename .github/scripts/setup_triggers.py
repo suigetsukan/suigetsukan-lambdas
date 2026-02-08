@@ -5,6 +5,7 @@ Setup Lambda triggers based on config.json event_sources.
 
 import json
 import os
+import sys
 import time
 
 import boto3
@@ -222,7 +223,7 @@ def setup_eventbridge_trigger(config, lambda_arn):
 def main():
     if not ACCOUNT_ID:
         print("ERROR: AWS_ACCOUNT_ID environment variable required")
-        return
+        sys.exit(1)
     lambda_dirs = get_lambda_dirs()
     if not lambda_dirs:
         print("No Lambdas to configure triggers for")

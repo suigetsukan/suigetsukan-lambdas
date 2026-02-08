@@ -17,8 +17,22 @@ from common.constants import (
     CORS_METHODS_GET_POST_OPTIONS,
     CORS_ORIGIN_ALL,
     DEFAULT_REGION,
+    HTTP_BAD_REQUEST,
     HTTP_OK,
 )
+
+
+def _error_response(status_code, message):
+    """Return a standardized error response with CORS headers."""
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Access-Control-Allow-Origin": CORS_ORIGIN_ALL,
+            "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
+            "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
+        },
+        "body": json.dumps({"error": message}),
+    }
 
 
 def compile_users(resp):
@@ -208,14 +222,14 @@ def list_handler(client, USER_POOL_ID):
     print("all_users: ", all_users)
     unapproved_users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_UNAPPROVED)
     print("unapproved_users: ", unapproved_users)
-    for user in unapproved_users:
-        all_users.remove(user)
-
     approved_users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_APPROVED)
     print("approved_users: ", approved_users)
-    for user in approved_users:
-        all_users.remove(user)
-
+    unapproved_set = {(u["user_name"], u["email"]) for u in unapproved_users}
+    approved_set = {(u["user_name"], u["email"]) for u in approved_users}
+    for user in list(all_users):
+        key = (user["user_name"], user["email"])
+        if key in unapproved_set or key in approved_set:
+            all_users.remove(user)
     print("remaining users: ", all_users)
 
     body = {
@@ -353,31 +367,43 @@ def delete_handler(user_name, client, USER_POOL_ID):
     :param USER_POOL_ID: Cognito user pool id
     :return:  Nothing
     """
-
-    delete_user_completely(client, USER_POOL_ID, user_name)
     users = get_all_users(client, USER_POOL_ID)
-    body = None
+    email = None
     for user in users:
         if user["user_name"] == user_name:
             email = user["email"]
-            send_mail(
-                [email],
-                "Suigetsukan Curriculum Account Deleted!",
-                "Your account has been deleted by the administrator",
-            )
-            body = f"The user {email} account has been deleted"
-            print("delete email sent to: ", email)
             break
-    return body
+    if not email:
+        raise RuntimeError("User not found for deletion")
+    delete_user_completely(client, USER_POOL_ID, user_name)
+    send_mail(
+        [email],
+        "Suigetsukan Curriculum Account Deleted!",
+        "Your account has been deleted by the administrator",
+    )
+    print("delete email sent to: ", email)
+    return f"The user {email} account has been deleted"
 
 
 def handler(event, context):
     print(event)
+    if not event.get("httpMethod") or not event.get("path"):
+        return _error_response(HTTP_BAD_REQUEST, "Missing httpMethod or path")
     REGION = os.environ["AWS_REGION"]
     USER_POOL_ID = os.environ["AWS_COGNITO_USER_POOL_ID"]
 
     client = boto3.client("cognito-idp", region_name=REGION)
 
+    if event["httpMethod"] == "OPTIONS":
+        return {
+            "statusCode": 204,
+            "headers": {
+                "Access-Control-Allow-Origin": CORS_ORIGIN_ALL,
+                "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
+                "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
+            },
+            "body": "",
+        }
     if event["httpMethod"] == "GET":
         if event["path"] == "/list":
             body = list_handler(client, USER_POOL_ID)
@@ -387,11 +413,23 @@ def handler(event, context):
             raise RuntimeError(f"Invalid GET path: {event['path']}")
 
     elif event["httpMethod"] == "POST":
+        body_raw = event.get("body")
+        if body_raw is None or body_raw == "":
+            return _error_response(HTTP_BAD_REQUEST, "Missing body")
+        try:
+            data = json.loads(body_raw)
+        except json.JSONDecodeError:
+            return _error_response(HTTP_BAD_REQUEST, "Invalid JSON")
+        required = ["user", "user_email", "admin_email"]
+        missing = [k for k in required if not data.get(k)]
+        if missing:
+            return _error_response(
+                HTTP_BAD_REQUEST, f"Missing required fields: {', '.join(missing)}"
+            )
+
         admin_users = get_admin_users(client, USER_POOL_ID)
 
         print("admin_users: ", admin_users)
-
-        data = json.loads(event["body"])
         print("data: ", data)
 
         user_name = data["user"]

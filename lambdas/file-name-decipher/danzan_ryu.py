@@ -24,6 +24,18 @@ from common.danzan_ryu_mappings import (
 DDB_DANZAN_RYU_TABLE = os.environ["AWS_DDB_DANZAN_RYU_TABLE_NAME"]
 
 
+def _require_match(match_result, file_stem, scroll):
+    """Raise if match_result is empty (regex did not match)."""
+    if not match_result:
+        raise RuntimeError(f"Invalid Danzan Ryu file stem for {scroll}: {file_stem}")
+
+
+def _require_stem_length(file_stem, min_len, scroll):
+    """Raise if file_stem is too short."""
+    if len(file_stem) < min_len:
+        raise RuntimeError(f"Invalid Danzan Ryu file stem for {scroll}: {file_stem}")
+
+
 def get_danzan_ryu_scroll_name(scroll_char):
     """
     Identify the scroll we are processing by using a single character
@@ -111,6 +123,7 @@ def handle_basic_weapons(file_stem, json_data):
     :return: The offset of the item
     """
     item_stem = utils.remove_char(file_stem, 0)
+    _require_stem_length(item_stem, 2, "basic_weapons")
     set_number = item_stem[0]
     technique_number = item_stem[1]
     return utils.find_two_datapoints_item_offset(
@@ -127,6 +140,7 @@ def handle_advanced_weapons(file_stem, json_data):
     :param json_data: The data we need to find the offset for
     :return: The offset of the item
     """
+    _require_stem_length(file_stem, 3, "advanced_weapons")
     weapon = get_weapon_id(file_stem[1])
     number = file_stem[2]
     return utils.find_two_datapoints_item_offset("Weapon", weapon, "Number", number, json_data)
@@ -140,6 +154,7 @@ def handle_kdm(file_stem, json_data):
     :param json_data: The data we need to find the offset for
     :return: The offset of the item
     """
+    _require_stem_length(file_stem, 3, "kdm")
     drill_type = get_kdm_id(file_stem[1])
     number = file_stem[2]
     return utils.find_two_datapoints_item_offset(
@@ -155,6 +170,7 @@ def handle_shime(file_stem, json_data):
     :param json_data: The data we need to find the offset for
     :return: The offset of the item
     """
+    _require_stem_length(file_stem, 3, "shime")
     flow_number = file_stem[1]
     technique_number = file_stem[2]
     return utils.find_two_datapoints_item_offset(
@@ -170,6 +186,7 @@ def handle_goshin(file_stem, json_data):
     :param json_data: The data we need to find the offset for
     :return: The offset of the item
     """
+    _require_stem_length(file_stem, 3, "goshin")
     entering_direction = get_goshin_id(file_stem[1])
     number = file_stem[2]
     return utils.find_two_datapoints_item_offset(
@@ -185,8 +202,10 @@ def handle_daito_no_maki(file_stem, json_data):
     :param json_data: The data we need to find the offset for
     :return: The offset of the item
     """
+    _require_stem_length(file_stem, 2, "daito_no_maki")
     group = file_stem[1]
     temp = re.findall(r"\d+", file_stem)
+    _require_match(temp, file_stem, "daito_no_maki")
     number = temp[0]
     return utils.find_two_datapoints_item_offset("Group", group, "Number", number, json_data)
 
@@ -199,8 +218,8 @@ def handle_shime_groundflow(file_stem, json_data):
     :param json_data: The data we need to find the offset for
     :return: The offset of the item
     """
+    _require_stem_length(file_stem, 2, "shime_groundflow")
     flow_number = file_stem[1]
-    # print(flow_number)
     return utils.find_one_datapoint_item_offset("Number", flow_number, json_data)
 
 
@@ -213,6 +232,7 @@ def handle_katsu_kappo(file_stem, json_data):
     :return: The offset of the item
     """
     temp = re.findall(r"(\d+)", file_stem)
+    _require_match(temp, file_stem, "katsu_kappo")
     section = str(temp[0])[0:2]
     number = str(temp[0])[-1]
     return utils.find_two_datapoints_item_offset("Section", section, "Number", number, json_data)
@@ -227,6 +247,7 @@ def handle_drills(file_stem, json_data):
     :return: The offset of the item
     """
     names = re.findall(r"^p([0-9]{2})([0-9]{2})([0-9]{2})([a-y]{1})$", file_stem)
+    _require_match(names, file_stem, "drills")
     group_name = get_drill_group_name(names[0][0])
     set_number = str(int(names[0][1]))  # int() removes the leading zero
     technique_number = str(int(names[0][2]))  # int() removes the leading zero
@@ -245,6 +266,7 @@ def handle_simple_table_model(file_stem, json_data):
     """
     item_stem = utils.remove_char(file_stem, 0)
     temp = re.findall(r"\d+", item_stem)
+    _require_match(temp, file_stem, "simple_table_model")
     table_item_number = temp[0]
     return utils.find_one_datapoint_item_offset("Number", table_item_number, json_data)
 
@@ -317,9 +339,10 @@ def handle_danzan_ryu(hls_url):
     """
     my_ddb_table = boto3.resource("dynamodb").Table(DDB_DANZAN_RYU_TABLE)
     stub = utils.get_file_stub(hls_url)
-    stu = utils.remove_char(stub, 0)
-    scroll_name = get_danzan_ryu_scroll_name(stu[0])
+    if not stub:
+        raise RuntimeError("Invalid danzan ryu URL: no file stub")
+    scroll_name = get_danzan_ryu_scroll_name(stub[0])
     print(scroll_name)
-    response = update_ddb(scroll_name, stu, my_ddb_table, hls_url)
+    response = update_ddb(scroll_name, stub, my_ddb_table, hls_url)
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("Failed to update the database")

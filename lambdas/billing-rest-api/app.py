@@ -55,8 +55,11 @@ def get_cost_and_usage(client, year, month):
         Metrics=[CE_METRIC_BLENDED_COST],
     )
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
-        raise Exception("Error in get_cost_and_usage_response")
-    cost = response["ResultsByTime"][0]["Total"]["BlendedCost"]["Amount"]
+        raise RuntimeError("Error in get_cost_and_usage_response")
+    results = response.get("ResultsByTime", [])
+    if not results:
+        return 0.0
+    cost = results[0]["Total"]["BlendedCost"]["Amount"]
     return round(float(cost), 2)
 
 
@@ -85,7 +88,7 @@ def get_cost_forecast(client):
             PredictionIntervalLevel=CE_PREDICTION_INTERVAL_LEVEL,
         )
         if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
-            raise Exception("Error in get_usage_forecast_response")
+            raise RuntimeError("Error in get_usage_forecast_response")
         cost = response["Total"]["Amount"]
     else:
         cost = 0.0

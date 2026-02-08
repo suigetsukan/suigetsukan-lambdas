@@ -20,13 +20,27 @@ def extract_file_url(event):
     :param event: The Lambda event
     :return: The file URL
     """
-    subject = event["Records"][0]["Sns"]["Subject"]
+    if not event.get("Records") or not isinstance(event["Records"], list):
+        raise ValueError("Invalid event: missing or empty Records")
+    record = event["Records"][0]
+    sns = record.get("Sns") if isinstance(record, dict) else None
+    if not sns or "Subject" not in sns:
+        raise ValueError("Invalid event: missing Sns or Subject")
+    subject = sns["Subject"]
     if "Complete" in subject:
         print("'Complete' type notification detected")
-        file_url = json.loads(event["Records"][0]["Sns"]["Message"])["hlsUrl"]
+        try:
+            msg = json.loads(sns["Message"])
+        except json.JSONDecodeError as err:
+            raise ValueError("Invalid JSON in Complete notification Message") from err
+        file_url = msg.get("hlsUrl")
+        if not file_url:
+            raise ValueError("Complete notification missing hlsUrl")
     elif "Direct" in subject:
         print("'Direct' type notification detected")
-        file_url = event["Records"][0]["Sns"]["Message"]
+        file_url = sns.get("Message") or ""
+        if not file_url or not isinstance(file_url, str):
+            raise ValueError("Direct notification missing or invalid Message")
     elif "Ingest" in subject:
         print("'Ingest' type notification detected. No further processing.")
         file_url = None
@@ -53,7 +67,7 @@ def lambda_handler(event, context):
         if file_stem.startswith("d"):
             print("art: danzan ryu")
             danzan_ryu.handle_danzan_ryu(file_url)
-        elif file_stem.startswith("b"):
+        elif file_stem and file_stem[0] in "bcefghijklm":
             print("art: battodo")
             battodo.handle_battodo(file_url)
         elif file_stem.startswith("a"):

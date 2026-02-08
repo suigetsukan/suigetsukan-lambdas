@@ -3,6 +3,8 @@ Tests for file-name-decipher: app, aikido, battodo, danzan_ryu logic.
 """
 
 import json
+from unittest.mock import patch
+
 import pytest
 
 import aikido
@@ -66,6 +68,56 @@ class TestAppExtractFileUrl:
         }
         with pytest.raises(RuntimeError, match="Unknown notification type"):
             app.extract_file_url(event)
+
+    def test_extract_empty_records_raises(self):
+        with pytest.raises(ValueError, match="missing or empty Records"):
+            app.extract_file_url({"Records": []})
+
+    def test_extract_missing_records_raises(self):
+        with pytest.raises(ValueError, match="missing or empty Records"):
+            app.extract_file_url({})
+
+    def test_extract_malformed_sns_raises(self):
+        with pytest.raises(ValueError, match="missing Sns or Subject"):
+            app.extract_file_url({"Records": [{"Sns": {}}]})
+
+    def test_extract_complete_invalid_json_raises(self):
+        event = {"Records": [{"Sns": {"Subject": "Video Complete", "Message": "{invalid}"}}]}
+        with pytest.raises(ValueError, match="Invalid JSON"):
+            app.extract_file_url(event)
+
+    def test_extract_complete_missing_hlsurl_raises(self):
+        event = {"Records": [{"Sns": {"Subject": "Video Complete", "Message": json.dumps({})}}]}
+        with pytest.raises(ValueError, match="missing hlsUrl"):
+            app.extract_file_url(event)
+
+    def test_extract_direct_empty_message_raises(self):
+        event = {"Records": [{"Sns": {"Subject": "Direct", "Message": ""}}]}
+        with pytest.raises(ValueError, match="missing or invalid Message"):
+            app.extract_file_url(event)
+
+
+class TestAppLambdaHandlerRouting:
+    """Tests for app.lambda_handler routing by file stem prefix."""
+
+    def test_battodo_c_prefix_routes_to_battodo(self):
+        """Battodo scrolls c (shodan_uchi_waza) should route to battodo, not raise."""
+        event = {
+            "Records": [
+                {
+                    "Sns": {
+                        "Subject": "Direct",
+                        "Message": "https://cdn.example.com/c05a.m3u8",
+                    }
+                }
+            ]
+        }
+        with (
+            patch("app.utils.get_stub", return_value="c05a"),
+            patch("app.battodo.handle_battodo") as mock_handle,
+        ):
+            app.lambda_handler(event, None)
+            mock_handle.assert_called_once_with("https://cdn.example.com/c05a.m3u8")
 
 
 class TestAikidoLocateTechnique:
@@ -149,6 +201,11 @@ class TestBattodoScrollHandler:
         with pytest.raises(RuntimeError, match="Invalid Battodo scroll"):
             battodo.pick_battodo_scroll_handler("invalid", "x", [])
 
+    def test_invalid_file_stem_raises(self):
+        json_data = [{"Number": "1"}]
+        with pytest.raises(RuntimeError, match="Invalid Battodo file stem"):
+            battodo.pick_battodo_scroll_handler("shodan_uchi_waza", "x99z", json_data)
+
 
 class TestDanzanRyuScrollHandler:
     """Tests for danzan_ryu.pick_danzan_ryu_scroll_handler."""
@@ -190,6 +247,11 @@ class TestDanzanRyuScrollHandler:
         ]
         offset = danzan_ryu.pick_danzan_ryu_scroll_handler("ukemi", "b05a", json_data)
         assert offset == 1
+
+    def test_invalid_file_stem_raises(self):
+        json_data = [{"Group": "Footwork", "Set": "1", "Number": "1"}]
+        with pytest.raises(RuntimeError, match="Invalid Danzan Ryu file stem"):
+            danzan_ryu.pick_danzan_ryu_scroll_handler("drills", "x9999z", json_data)
 
 
 class TestBattodoScrollName:

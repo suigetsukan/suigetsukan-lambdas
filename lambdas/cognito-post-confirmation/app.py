@@ -101,11 +101,19 @@ def handler(event, context):
     """
     print(event)
     print(context)
+    if not event.get("triggerSource"):
+        raise ValueError("Invalid Cognito event: missing triggerSource")
     trigger = event["triggerSource"]
     if trigger == COGNITO_TRIGGER_POST_CONFIRMATION:
-        username = event["userName"]
-        user_pool_id = event["userPoolId"]
-        email = event["request"]["userAttributes"]["email"]
+        username = event.get("userName")
+        user_pool_id = event.get("userPoolId")
+        request = event.get("request") or {}
+        user_attrs = request.get("userAttributes") or {}
+        email = user_attrs.get("email")
+        if not all([username, user_pool_id, email]):
+            raise ValueError(
+                "Invalid Cognito event: missing userName, userPoolId, or request.userAttributes.email"
+            )
         add_user_to_cognito_group(user_pool_id, username, COGNITO_GROUP_UNAPPROVED)
         inform_administrators(email, user_pool_id)
     else:

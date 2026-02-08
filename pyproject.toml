@@ -35,7 +35,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "ARG", "S106", "F401", "B007"]  # assert OK, unused args/imports in tests
 ".github/scripts/*" = ["S602", "S608", "C901"]  # subprocess shell, IoT SQL, deploy complexity
-"lambdas/*/app.py" = ["ARG001"]  # lambda handler context param required by runtime
+"lambdas/*/app.py" = ["ARG001", "C901"]  # lambda handler context param; complexity
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

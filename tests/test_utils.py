@@ -69,10 +69,18 @@ class TestHelpers:
         assert get_file_stub("https://bucket.s3.amazonaws.com/path/a0101x.m3u8") == "a0101x"
         assert get_file_stub("/local/path/c01a.m3u8") == "c01a"
 
+    def test_get_file_stub_empty_path_raises(self):
+        with pytest.raises(ValueError, match="no file stub"):
+            get_file_stub("https://cdn.example.com/")
+
     def test_get_hls_url_stub_letter(self):
         # Stub letter is the last character of the stem
         url = "https://bucket.s3.amazonaws.com/path/a0101x.m3u8"
         assert get_hls_url_stub_letter(url) == "x"
+
+    def test_get_hls_url_stub_letter_empty_path_raises(self):
+        with pytest.raises(ValueError, match="no file stub"):
+            get_hls_url_stub_letter("https://cdn.example.com/")
 
     def test_remove_char(self):
         assert remove_char("abcde", 0) == "bcde"

@@ -2,6 +2,7 @@ name: Deploy Lambdas (Smart + Validated)
 
 on:
   push:
+    branches: [main]
 
 jobs:
   detect-changes:
@@ -46,7 +47,8 @@ jobs:
       - name: Check commit message for deploy_all
         id: commit_check
         run: |
-          if echo "${{ github.event.head_commit.message }}" | grep -iq "deploy_all"; then
+          msg="${{ github.event.head_commit.message || '' }}"
+          if echo "$msg" | grep -iq "deploy_all"; then
             echo "deploy_all_commit=true" >> $GITHUB_OUTPUT
           else
             echo "deploy_all_commit=false" >> $GITHUB_OUTPUT

@@ -21,6 +21,46 @@ def _load_cognito_rest_app():
     return module
 
 
+def test_handler_options_returns_204():
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+        ),
+        patch("boto3.client"),
+    ):
+        app = _load_cognito_rest_app()
+        event = {"httpMethod": "OPTIONS", "path": "/list"}
+        result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 204
+        assert result["body"] == ""
+        assert "Access-Control-Allow-Origin" in result["headers"]
+
+
+def test_handler_missing_httpmethod_returns_400():
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+        ),
+        patch("boto3.client"),
+    ):
+        app = _load_cognito_rest_app()
+        event = {"path": "/list"}
+        result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 400
+        body = json.loads(result["body"])
+        assert "Missing httpMethod or path" in body["error"]
+
+
 def test_handler_get_list_returns_structure():
     with (
         patch.dict(
@@ -51,3 +91,91 @@ def test_handler_get_list_returns_structure():
         body = json.loads(result["body"])
         assert "approved" in body
         assert "unapproved" in body
+
+
+def test_handler_post_missing_body_returns_400():
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+        ),
+        patch("boto3.client") as mock_boto,
+    ):
+        cognito_mock = MagicMock()
+        cognito_mock.list_users_in_group.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [],
+        }
+        mock_boto.return_value = cognito_mock
+
+        app = _load_cognito_rest_app()
+        event = {"httpMethod": "POST", "path": "/approve", "body": None}
+        result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 400
+        body = json.loads(result["body"])
+        assert "error" in body
+        assert "Missing body" in body["error"]
+
+
+def test_handler_post_invalid_json_returns_400():
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+        ),
+        patch("boto3.client") as mock_boto,
+    ):
+        cognito_mock = MagicMock()
+        cognito_mock.list_users_in_group.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [],
+        }
+        mock_boto.return_value = cognito_mock
+
+        app = _load_cognito_rest_app()
+        event = {"httpMethod": "POST", "path": "/approve", "body": "{invalid"}
+        result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 400
+        body = json.loads(result["body"])
+        assert "error" in body
+        assert "Invalid JSON" in body["error"]
+
+
+def test_handler_post_missing_required_fields_returns_400():
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+        ),
+        patch("boto3.client") as mock_boto,
+    ):
+        cognito_mock = MagicMock()
+        cognito_mock.list_users_in_group.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [],
+        }
+        mock_boto.return_value = cognito_mock
+
+        app = _load_cognito_rest_app()
+        event = {
+            "httpMethod": "POST",
+            "path": "/approve",
+            "body": json.dumps({"user": "someuser"}),
+        }
+        result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 400
+        body = json.loads(result["body"])
+        assert "error" in body
+        assert "Missing required fields" in body["error"]

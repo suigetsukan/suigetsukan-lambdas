@@ -69,7 +69,10 @@ def get_hls_url_stub_letter(url):
     :param url: The hls url
     :return: The letter
     """
-    return url.split("/")[-1].split(".")[0][-1]
+    stub = url.split("/")[-1].split(".")[0]
+    if not stub:
+        raise ValueError("URL has no file stub")
+    return stub[-1]
 
 
 def handle_variations(current_variations, hls_url):
@@ -106,7 +109,10 @@ def get_file_stub(hls_url):
     :return: The file stub
     """
     stub = hls_url.split("/")[-1]
-    return stub.split(".")[0]
+    stub = stub.split(".")[0]
+    if not stub:
+        raise ValueError("URL has no file stub")
+    return stub
 
 
 def remove_char(a_str, n):
@@ -163,7 +169,10 @@ def get_full_ddb_table_name(table_name_string):
     """
     ddb_client = boto3.client("dynamodb")
     response = ddb_client.list_tables(ExclusiveStartTableName=table_name_string, Limit=1)
-    return response["TableNames"][0]
+    tables = response.get("TableNames", [])
+    if not tables:
+        raise RuntimeError(f"No DynamoDB table found for prefix: {table_name_string}")
+    return tables[0]
 
 
 def extract_stub_list(variations):

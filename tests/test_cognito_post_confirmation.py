@@ -50,6 +50,14 @@ def test_handler_post_confirmation_returns_event():
         assert result == event
 
 
+def test_handler_missing_trigger_source_raises():
+    with patch.dict("os.environ", {"AWS_REGION": "us-west-1"}):
+        app = _load_cognito_post_app()
+        event: dict = {}
+        with pytest.raises(ValueError, match="missing triggerSource"):
+            app.handler(event, MagicMock())
+
+
 def test_handler_other_trigger_passes_through():
     with patch.dict("os.environ", {"AWS_REGION": "us-west-1"}):
         app = _load_cognito_post_app()
