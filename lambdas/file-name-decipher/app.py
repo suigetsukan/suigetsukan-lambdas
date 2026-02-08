@@ -6,11 +6,14 @@ table.
 #  Copyright (c) 2023. Suigetsukan Dojo
 
 import json
+import logging
 
 import aikido
 import battodo
 import danzan_ryu
 import utils
+
+logger = logging.getLogger(__name__)
 
 
 def extract_file_url(event):
@@ -28,7 +31,7 @@ def extract_file_url(event):
         raise ValueError("Invalid event: missing Sns or Subject")
     subject = sns["Subject"]
     if "Complete" in subject:
-        print("'Complete' type notification detected")
+        logger.debug("Complete type notification detected")
         try:
             msg = json.loads(sns["Message"])
         except json.JSONDecodeError as err:
@@ -37,12 +40,12 @@ def extract_file_url(event):
         if not file_url:
             raise ValueError("Complete notification missing hlsUrl")
     elif "Direct" in subject:
-        print("'Direct' type notification detected")
+        logger.debug("Direct type notification detected")
         file_url = sns.get("Message") or ""
         if not file_url or not isinstance(file_url, str):
             raise ValueError("Direct notification missing or invalid Message")
     elif "Ingest" in subject:
-        print("'Ingest' type notification detected. No further processing.")
+        logger.debug("Ingest type notification detected, no further processing")
         file_url = None
     else:
         raise RuntimeError("Unknown notification type: " + subject)
@@ -58,20 +61,16 @@ def lambda_handler(event, context):
     :param context: The Lambda context
     :return: Nothing
     """
-    print(json.dumps(event))  # for debugging purposes & use for test data
+    logger.debug("Processing SNS notification")
     file_url = extract_file_url(event)
     if file_url:
-        print("hls url: " + file_url)
         file_stem = utils.get_stub(file_url)
-        print("file stem: " + file_stem)
+        logger.info("Processing file stem: %s", file_stem)
         if file_stem.startswith("d"):
-            print("art: danzan ryu")
             danzan_ryu.handle_danzan_ryu(file_url)
         elif file_stem and file_stem[0] in "bcefghijklm":
-            print("art: battodo")
             battodo.handle_battodo(file_url)
         elif file_stem.startswith("a"):
-            print("art: aikido")
             aikido.handle_aikido(file_url)
         else:
             raise RuntimeError("Invalid video file name: " + file_stem)

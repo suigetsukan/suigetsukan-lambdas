@@ -3,10 +3,9 @@ This is part of a lambda function which is used to create an entry in the Dynamo
 on an url
 """
 
+import logging
 import os
 import re
-from pathlib import Path
-from urllib.parse import urlparse
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -21,6 +20,7 @@ from common.danzan_ryu_mappings import (
     DANZAN_RYU_WEAPON_DICT,
 )
 
+logger = logging.getLogger(__name__)
 DDB_DANZAN_RYU_TABLE = os.environ["AWS_DDB_DANZAN_RYU_TABLE_NAME"]
 
 
@@ -88,29 +88,6 @@ def get_drill_group_name(group_number):
     :return: The drill group name
     """
     return DANZAN_RYU_DRILL_GROUPS[group_number]
-
-
-def get_stub(file_url):
-    """
-    Get the stub from a file name
-
-    :param file_url: The file name
-    :return: The stub in lower case
-    """
-    file_name = urlparse(file_url).path.split("/")[-1]
-    # print(file_name)
-    return Path(str(file_name).lower()).stem
-
-
-def sort_url_by_stub(url_list):
-    """
-    Sort the list of urls by the stub
-
-    :param url_list: The list of urls
-    :return: The sorted list of urls
-    """
-    url_list.sort(key=get_stub)
-    return url_list
 
 
 def handle_basic_weapons(file_stem, json_data):
@@ -338,11 +315,11 @@ def handle_danzan_ryu(hls_url):
     :return: The updated hls url in the database
     """
     my_ddb_table = boto3.resource("dynamodb").Table(DDB_DANZAN_RYU_TABLE)
-    stub = utils.get_file_stub(hls_url)
+    stub = utils.get_stub(hls_url)
     if not stub:
         raise RuntimeError("Invalid danzan ryu URL: no file stub")
     scroll_name = get_danzan_ryu_scroll_name(stub[0])
-    print(scroll_name)
+    logger.debug("Processing scroll: %s", scroll_name)
     response = update_ddb(scroll_name, stub, my_ddb_table, hls_url)
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("Failed to update the database")

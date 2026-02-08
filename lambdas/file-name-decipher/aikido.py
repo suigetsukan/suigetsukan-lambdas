@@ -3,6 +3,7 @@ This handles the Aikido portion of the suigetsukan-curriculum website.
 """
 #  Copyright (c) 2023. Suigetsukan Dojo
 
+import logging
 import os
 import re
 
@@ -13,6 +14,7 @@ import utils
 from common.aikido_mappings import AIKIDO_REGEX_LOOKUP, AIKIDO_SCROLL_LOOKUP
 from common.constants import DDB_INDEX_NAME, DDB_ITEMS_KEY, DDB_MAP_KEY, DDB_VARIATIONS_KEY, HTTP_OK
 
+logger = logging.getLogger(__name__)
 DDB_AIKIDO_TABLE = os.environ["AWS_DDB_AIKIDO_TABLE_NAME"]
 
 
@@ -51,7 +53,6 @@ def update_ddb(scroll, file_stem, ddb_table, hls_url):
     if query_response["Count"] == 0:
         raise RuntimeError("Scroll not found in database")
     json_data = query_response["Items"][0][DDB_MAP_KEY][DDB_ITEMS_KEY]
-    # print(json_data)
     data_offset = locate_technique_in_json(scroll, file_stem, json_data)
     current_variations = query_response["Items"][0][DDB_MAP_KEY][DDB_ITEMS_KEY][data_offset][
         DDB_VARIATIONS_KEY
@@ -72,12 +73,12 @@ def handle_aikido(hls_url):
     :return: Nothing
     """
     my_ddb_table = boto3.resource("dynamodb").Table(DDB_AIKIDO_TABLE)
-    stub = utils.get_file_stub(hls_url)
+    stub = utils.get_stub(hls_url)
     parts = re.findall(r"^a([0-9]{2}).*$", stub)
     if not parts:
         raise RuntimeError(f"Invalid aikido stub pattern: {stub}")
     scroll_name = AIKIDO_SCROLL_LOOKUP[int(parts[0])]  # use int to remove leading zeros
-    print(f"scroll_name: {scroll_name}")
+    logger.debug("Processing scroll: %s", scroll_name)
     response = update_ddb(scroll_name, stub, my_ddb_table, hls_url)
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("Failed to update the database")

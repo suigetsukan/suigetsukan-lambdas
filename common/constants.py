@@ -12,6 +12,7 @@ DEFAULT_REGION = "us-west-1"
 # HTTP
 # ---------------------------------------------------------------------------
 HTTP_OK = 200
+HTTP_NO_CONTENT = 204
 HTTP_BAD_REQUEST = 400
 HTTP_UNAUTHORIZED = 401
 

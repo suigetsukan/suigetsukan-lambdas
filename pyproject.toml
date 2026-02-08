@@ -22,6 +22,7 @@ select = [
     "BLE",    # flake8-blind-except
     "S",      # flake8-bandit (security)
     "C90",    # mccabe complexity
+    "PLR0913",  # too-many-arguments (max 7)
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
@@ -35,10 +36,13 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "ARG", "S106", "F401", "B007"]  # assert OK, unused args/imports in tests
 ".github/scripts/*" = ["S602", "S608", "C901"]  # subprocess shell, IoT SQL, deploy complexity
-"lambdas/*/app.py" = ["ARG001", "C901"]  # lambda handler context param; complexity
+"lambdas/*/app.py" = ["ARG001"]  # lambda handler context param (unused)
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 7
 
 [tool.ruff.format]
 quote-style = "double"

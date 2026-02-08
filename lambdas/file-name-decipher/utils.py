@@ -3,12 +3,7 @@ This module contains utility functions for the AWS Lambda function
 """
 #  Copyright (c) 2023. Suigetsukan Dojo
 
-from pathlib import Path
 from urllib.parse import urlparse
-
-import boto3
-
-from common.constants import DDB_VARIATIONS_KEY, REMOVE_ALL_TECHNIQUE_VARIATIONS
 
 
 def find_one_datapoint_item_offset(label1, value1, json_data):
@@ -92,9 +87,7 @@ def handle_variations(current_variations, hls_url):
         new_variations.append(hls_url)
 
         for url in current_variations:
-            # print('url = ', url)
             stub_letter = get_hls_url_stub_letter(url)
-            # print('stub_letter = ', stub_letter)
             if stub_letter not in variation_set:
                 variation_set.add(stub_letter)
                 new_variations.append(url)
@@ -104,15 +97,24 @@ def handle_variations(current_variations, hls_url):
 
 def get_file_stub(hls_url):
     """
-    Get the file stub from the hls url
+    Get the file stub from the hls url (lowercase, no extension).
     :param hls_url: The hls url
     :return: The file stub
     """
-    stub = hls_url.split("/")[-1]
-    stub = stub.split(".")[0]
-    if not stub:
+    return get_stub(hls_url)
+
+
+def get_stub(file_url):
+    """
+    Get the stub from a file name or URL.
+
+    :param file_url: The file name or URL
+    :return: The stub in lower case (filename without extension)
+    """
+    file_name = urlparse(file_url).path.split("/")[-1]
+    if not file_name:
         raise ValueError("URL has no file stub")
-    return stub
+    return str(file_name).lower().rsplit(".", 1)[0] if "." in file_name else str(file_name).lower()
 
 
 def remove_char(a_str, n):
@@ -138,18 +140,6 @@ def convert_to_camel_case(string):
     return "".join(x.capitalize() or "_" for x in string.split("_"))
 
 
-def get_stub(file_url):
-    """
-    Get the stub from a file name
-
-    :param file_url: The file name
-    :return: The stub in lower case
-    """
-    file_name = urlparse(file_url).path.split("/")[-1]
-    print(file_name)
-    return Path(str(file_name).lower()).stem
-
-
 def sort_url_by_stub(url_list):
     """
     Sort the list of urls by the stub
@@ -159,101 +149,3 @@ def sort_url_by_stub(url_list):
     """
     url_list.sort(key=get_stub)
     return url_list
-
-
-def get_full_ddb_table_name(table_name_string):
-    """
-    Find the DynamoDB table based a string version of the table name
-    :param table_name_string: A string of the partial table name
-    :return: The full ddb table name
-    """
-    ddb_client = boto3.client("dynamodb")
-    response = ddb_client.list_tables(ExclusiveStartTableName=table_name_string, Limit=1)
-    tables = response.get("TableNames", [])
-    if not tables:
-        raise RuntimeError(f"No DynamoDB table found for prefix: {table_name_string}")
-    return tables[0]
-
-
-def extract_stub_list(variations):
-    """
-    Extract the list of file stubs from the list of urls in variations list
-
-    :param variations: The variations
-    :return: The list of stubs
-    """
-    stub_list = []
-    for variation in variations:
-        print(variation)
-        stub = get_stub(variation)
-        stub_list.append(stub)
-    return stub_list
-
-
-def update_technique_list(data, table, file_url):
-    """
-    Update the technique list in the DynamoDB table
-
-    :param data: The data dictionary
-    :param table: The DynamoDB table
-    :param file_url: The file URL to add to the list of variations in the data dictionary.
-    :return: Nothing
-    """
-
-    # data = update_variations(data, file_url)
-    new_stub = get_stub(file_url)
-    stub_list = extract_stub_list(data[DDB_VARIATIONS_KEY])
-    if new_stub in stub_list:
-        print(f"Updating existing entry: {new_stub}")
-        for i, stub in enumerate(stub_list):
-            if stub == new_stub:
-                data[DDB_VARIATIONS_KEY][i] = file_url
-    else:
-        print(f"Adding new entry: {new_stub}")
-        data[DDB_VARIATIONS_KEY].append(file_url)
-
-    data[DDB_VARIATIONS_KEY] = sort_url_by_stub(data[DDB_VARIATIONS_KEY])
-    put_response = table.put_item(Item=data)
-    print(put_response)
-
-
-def reset_technique_list(data, table):
-    """
-    Special case. Remove the technique list in the DynamoDB table.
-    Used for testing purposes.
-
-    :param data: The data dictionary
-    :param table: The DynamoDB table
-    :return: Nothing
-    """
-    data[DDB_VARIATIONS_KEY] = []
-    put_response = table.put_item(Item=data)
-    print(put_response)
-
-
-def handle_technique_list(file_stem, data, table_handle, file_url):
-    """
-    Handle the technique list.
-
-    :param file_stem: A partial file name which dictates how the db is updated
-    :param data: a DynamoDB data dictionary
-    :param table_handle: A handle to the DynamoDB table
-    :param file_url: A URL to add to the list of variations in the data dictionary
-    :return: Nothing
-    """
-    if file_stem.endswith(REMOVE_ALL_TECHNIQUE_VARIATIONS):
-        reset_technique_list(data, table_handle)
-    else:
-        update_technique_list(data, table_handle, file_url)
-
-
-def get_table_handle(partial_table_name):
-    """
-    Get a handle to the DynamoDB table.
-    :param partial_table_name: The partial DynamoDB table name
-    :return: The DynamoDB table handle
-    """
-    table_name = get_full_ddb_table_name(partial_table_name)
-    ddb_client = boto3.resource("dynamodb")
-    table_handle = ddb_client.Table(table_name)
-    return table_handle

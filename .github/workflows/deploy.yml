@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed_lambdas: ${{ steps.extract.outputs.changed_lambdas }}
-      config_changed: ${{ steps.flags.outputs.config_changed }}
       deploy_all: ${{ steps.flags.outputs.deploy_all }}
     steps:
       - name: Checkout
@@ -57,7 +56,6 @@ jobs:
       - name: Set flags
         id: flags
         env:
-          LAMBDAS_FILES: ${{ steps.filter.outputs.lambdas_files }}
           COMMON_FILES: ${{ steps.filter.outputs.common_files }}
           LAYERS_FILES: ${{ steps.filter.outputs.layers_files }}
           CRITICAL_FILES: ${{ steps.filter.outputs.critical_files }}

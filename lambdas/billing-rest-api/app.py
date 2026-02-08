@@ -4,6 +4,7 @@ This is a REST wrapper for AWS Billing
 
 import calendar
 import json
+import logging
 import os
 from datetime import datetime, timedelta, date
 
@@ -21,6 +22,8 @@ from common.constants import (
     HTTP_OK,
     HTTP_UNAUTHORIZED,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _cors_origin():
@@ -96,17 +99,17 @@ def get_cost_forecast(client):
     :return: The cost forecast
     :rtype: float
     """
-
     current_year = datetime.now().year
-    current_month = datetime.now().month
-    current_day = datetime.now().day
-    last_day = calendar.monthrange(current_year, current_month)[1]
-    current_month = set_leading_zero(current_month)
-    current_day = set_leading_zero(current_day)
+    current_month_int = datetime.now().month
+    current_day_int = datetime.now().day
+    last_day = calendar.monthrange(current_year, current_month_int)[1]
+    current_month_str = set_leading_zero(current_month_int)
+    current_day_str = set_leading_zero(current_day_int)
 
-    first = str(current_year) + "-" + str(current_month) + "-" + str(current_day)
-    last = str(current_year) + "-" + str(current_month) + "-" + str(last_day)
-    if current_day != last_day:
+    first = str(current_year) + "-" + current_month_str + "-" + current_day_str
+    last = str(current_year) + "-" + current_month_str + "-" + str(last_day)
+    cost = 0.0
+    if current_day_int != last_day:
         response = client.get_cost_forecast(
             TimePeriod={"Start": first, "End": last},
             Granularity=CE_GRANULARITY_MONTHLY,
@@ -116,8 +119,6 @@ def get_cost_forecast(client):
         if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
             raise RuntimeError("Error in get_usage_forecast_response")
         cost = response["Total"]["Amount"]
-    else:
-        cost = 0.0
     return round(float(cost), 2)
 
 
@@ -152,11 +153,11 @@ def lambda_handler(event, context):
     """
     The main lambda handler function
     :param event: The event from the ether
-    :param context: THe runtime context
+    :param context: The runtime context
     :return:  The query response
     :rtype: dict
     """
-    print(event)
+    logger.debug("Request received")
     auth_err = _require_authorizer(event)
     if auth_err:
         return auth_err
@@ -169,8 +170,12 @@ def lambda_handler(event, context):
         "forecast": get_cost_forecast(client),
     }
 
-    # This goes to the CloudWatch Logs
-    print(body)
+    logger.info(
+        "Cost summary: this_month=%s last_month=%s forecast=%s",
+        body["this_month"],
+        body["last_month"],
+        body["forecast"],
+    )
 
     return {
         "statusCode": HTTP_OK,

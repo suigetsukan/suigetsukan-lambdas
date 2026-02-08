@@ -43,6 +43,7 @@ This document defines coding standards for suigetsukan-lambdas, adapted from MIS
 | Rule | Description | Limit |
 |------|-------------|-------|
 | Cyclomatic complexity | Per-function | ≤ 10 |
+| Function parameters | Max arguments per function | ≤ 7 |
 | Nesting depth | Reduce with early returns | ≤ 4 levels |
 | Line length | Per line | ≤ 100 chars |
 

@@ -4,6 +4,7 @@ This is a REST API lambda for accessing Cognito functions
 #  Copyright (c) 2023.  Suigetsukan Dojo
 
 import json
+import logging
 import os
 
 import boto3
@@ -18,9 +19,12 @@ from common.constants import (
     CORS_ORIGIN_ALL,
     DEFAULT_REGION,
     HTTP_BAD_REQUEST,
+    HTTP_NO_CONTENT,
     HTTP_OK,
     HTTP_UNAUTHORIZED,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _cors_origin():
@@ -49,6 +53,81 @@ def _require_authorizer(event):
             "Unauthorized: API Gateway must use Cognito authorizer",
         )
     return None
+
+
+def _options_response():
+    """Return CORS preflight response."""
+    return {
+        "statusCode": HTTP_NO_CONTENT,
+        "headers": {
+            "Access-Control-Allow-Origin": _cors_origin(),
+            "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
+            "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
+        },
+        "body": "",
+    }
+
+
+def _success_response(body):
+    """Return successful JSON response with CORS headers."""
+    return {
+        "statusCode": HTTP_OK,
+        "headers": {
+            "Access-Control-Allow-Origin": _cors_origin(),
+            "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
+            "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
+        },
+        "body": json.dumps(body),
+    }
+
+
+def _handle_get(event, client, user_pool_id):
+    """Handle GET requests; return response body."""
+    path = event["path"]
+    if path == "/list":
+        return list_handler(client, user_pool_id)
+    if path == "/list/admin":
+        return get_admin_users(client, user_pool_id)
+    raise RuntimeError(f"Invalid GET path: {path}")
+
+
+def _handle_post(event, client, user_pool_id):
+    """Handle POST requests; return response body."""
+    body_raw = event.get("body")
+    if body_raw is None or body_raw == "":
+        return _error_response(HTTP_BAD_REQUEST, "Missing body")
+    try:
+        data = json.loads(body_raw)
+    except json.JSONDecodeError:
+        return _error_response(HTTP_BAD_REQUEST, "Invalid JSON")
+    required = ["user", "user_email", "admin_email"]
+    missing = [k for k in required if not data.get(k)]
+    if missing:
+        return _error_response(HTTP_BAD_REQUEST, f"Missing required fields: {', '.join(missing)}")
+
+    user_name = data["user"]
+    user_email = data["user_email"]
+    actor = data["admin_email"]
+    admin_users = get_admin_users(client, user_pool_id)
+    path = event["path"]
+
+    post_handlers = {
+        "/approve": (approve_handler, "APPROVED", f"has been approved by {actor}"),
+        "/promote": (promote_handler, "PROMOTED", f"promoted to administrator by {actor}"),
+        "/close": (close_handler, "CLOSED", "account closed by user request"),
+        "/deny": (deny_handler, "DENIED", f"has been denied by {actor}"),
+        "/delete": (delete_handler, "DELETED", f"has been deleted by {actor}"),
+    }
+    for suffix, (handler_fn, subject, msg) in post_handlers.items():
+        if path.endswith(suffix):
+            body = handler_fn(user_name, client, user_pool_id)
+            send_mail(
+                admin_users,
+                f"{subject}: {user_email}",
+                f"User {user_email} {msg}",
+            )
+            return body
+    raise RuntimeError("Invalid POST path: " + path)
 
 
 def compile_users(resp):
@@ -235,18 +314,22 @@ def list_handler(client, USER_POOL_ID):
     :return: JSON object of users
     """
     all_users = get_all_users(client, USER_POOL_ID)
-    print("all_users: ", all_users)
     unapproved_users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_UNAPPROVED)
-    print("unapproved_users: ", unapproved_users)
     approved_users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_APPROVED)
-    print("approved_users: ", approved_users)
     unapproved_set = {(u["user_name"], u["email"]) for u in unapproved_users}
     approved_set = {(u["user_name"], u["email"]) for u in approved_users}
-    for user in list(all_users):
-        key = (user["user_name"], user["email"])
-        if key in unapproved_set or key in approved_set:
-            all_users.remove(user)
-    print("remaining users: ", all_users)
+    other_users = [
+        u
+        for u in all_users
+        if (u["user_name"], u["email"]) not in unapproved_set
+        and (u["user_name"], u["email"]) not in approved_set
+    ]
+    logger.debug(
+        "List: %d approved, %d unapproved, %d other",
+        len(approved_users),
+        len(unapproved_users),
+        len(other_users),
+    )
 
     body = {
         "approved": sorted(approved_users, key=lambda x: x["email"]),
@@ -264,7 +347,6 @@ def approve_handler(user_name, client, USER_POOL_ID):
     :return: JSON object
     """
     body = None
-    # print('user_name: ', user_name)
     users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_UNAPPROVED)
     for user in users:
         if user["user_name"] == user_name:
@@ -277,7 +359,7 @@ def approve_handler(user_name, client, USER_POOL_ID):
                 "Congratulations! Your account has been approved by Sensei.",
             )
             body = f"The user {email} has been approved"
-            print("approval email sent to: ", email)
+            logger.info("Approval email sent")
             break
 
     if not body:
@@ -295,7 +377,6 @@ def promote_handler(user_name, client, USER_POOL_ID):
     :return: JSON object
     """
     body = None
-    # print('user_name: ', user_name)
     users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_APPROVED)
     for user in users:
         if user["user_name"] == user_name:
@@ -307,7 +388,7 @@ def promote_handler(user_name, client, USER_POOL_ID):
                 "Congratulations! Your account has been promoted to Administrator.",
             )
             body = f"The user {email} has been promoted"
-            print("promotion email sent to: ", email)
+            logger.info("Promotion email sent")
             break
 
     if not body:
@@ -336,7 +417,7 @@ def deny_handler(user_name, client, USER_POOL_ID):
                 "We are sorry! Access to Suigetsukan Curriculum has been denied.",
             )
             body = f"The user {email} has been denied access"
-            print("deny email sent to: ", email)
+            logger.info("Denial email sent")
             break
 
     if not body:
@@ -365,7 +446,7 @@ def close_handler(user_name, client, USER_POOL_ID):
                 "Account closed. We are sorry to see you go!",
             )
             body = f"The user {email} account has been closed"
-            print("close email sent to: ", email)
+            logger.info("Account closure email sent")
             break
 
     if not body:
@@ -397,113 +478,33 @@ def delete_handler(user_name, client, USER_POOL_ID):
         "Suigetsukan Curriculum Account Deleted!",
         "Your account has been deleted by the administrator",
     )
-    print("delete email sent to: ", email)
+    logger.info("Deletion email sent")
     return f"The user {email} account has been deleted"
 
 
 def handler(event, context):
-    print(event)
+    logger.debug("Request received: %s %s", event.get("httpMethod"), event.get("path"))
     if not event.get("httpMethod") or not event.get("path"):
         return _error_response(HTTP_BAD_REQUEST, "Missing httpMethod or path")
-    REGION = os.environ["AWS_REGION"]
-    USER_POOL_ID = os.environ["AWS_COGNITO_USER_POOL_ID"]
 
-    client = boto3.client("cognito-idp", region_name=REGION)
+    region = os.environ["AWS_REGION"]
+    user_pool_id = os.environ["AWS_COGNITO_USER_POOL_ID"]
+    client = boto3.client("cognito-idp", region_name=region)
 
     if event["httpMethod"] == "OPTIONS":
-        return {
-            "statusCode": 204,
-            "headers": {
-                "Access-Control-Allow-Origin": _cors_origin(),
-                "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
-                "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
-            },
-            "body": "",
-        }
+        return _options_response()
     auth_err = _require_authorizer(event)
     if auth_err:
         return auth_err
+
     if event["httpMethod"] == "GET":
-        if event["path"] == "/list":
-            body = list_handler(client, USER_POOL_ID)
-        elif event["path"] == "/list/admin":
-            body = get_admin_users(client, USER_POOL_ID)
-        else:
-            raise RuntimeError(f"Invalid GET path: {event['path']}")
-
+        body = _handle_get(event, client, user_pool_id)
     elif event["httpMethod"] == "POST":
-        body_raw = event.get("body")
-        if body_raw is None or body_raw == "":
-            return _error_response(HTTP_BAD_REQUEST, "Missing body")
-        try:
-            data = json.loads(body_raw)
-        except json.JSONDecodeError:
-            return _error_response(HTTP_BAD_REQUEST, "Invalid JSON")
-        required = ["user", "user_email", "admin_email"]
-        missing = [k for k in required if not data.get(k)]
-        if missing:
-            return _error_response(
-                HTTP_BAD_REQUEST, f"Missing required fields: {', '.join(missing)}"
-            )
-
-        admin_users = get_admin_users(client, USER_POOL_ID)
-
-        print("admin_users: ", admin_users)
-        print("data: ", data)
-
-        user_name = data["user"]
-        # print('user_name: ', user_name)
-        user_email = data["user_email"]
-        # print('user_email: ', user_email)
-        actor = data["admin_email"]
-        # print('actor: ', actor)
-
-        if "approve" in event["path"]:
-            body = approve_handler(user_name, client, USER_POOL_ID)
-            send_mail(
-                admin_users,
-                f"APPROVED: {user_email}",
-                f"User {user_email} has been approved by {actor}",
-            )
-        elif "promote" in event["path"]:
-            body = promote_handler(user_name, client, USER_POOL_ID)
-            send_mail(
-                admin_users,
-                f"PROMOTED: {user_email}",
-                f"User {user_email} has been promoted to administrator by {actor}",
-            )
-        elif "close" in event["path"]:
-            body = close_handler(user_name, client, USER_POOL_ID)
-            send_mail(
-                admin_users,
-                f"CLOSED: {user_email}",
-                f"User {user_email} account closed by user request",
-            )
-        elif "deny" in event["path"]:
-            body = deny_handler(user_name, client, USER_POOL_ID)
-            send_mail(
-                admin_users,
-                f"DENIED: {user_email}",
-                f"User {user_email} has been denied by {actor}",
-            )
-        elif "delete" in event["path"]:
-            body = delete_handler(user_name, client, USER_POOL_ID)
-            send_mail(
-                admin_users,
-                f"DELETED: {user_email}",
-                f"User {user_email} has been deleted by {actor}",
-            )
-        else:
-            raise RuntimeError("Invalid POST path: " + event["path"])
+        result = _handle_post(event, client, user_pool_id)
+        if isinstance(result, dict) and "statusCode" in result:
+            return result  # already a full error response
+        body = result
     else:
         raise RuntimeError("Invalid http method: " + event["httpMethod"])
 
-    return {
-        "statusCode": HTTP_OK,
-        "headers": {
-            "Access-Control-Allow-Origin": _cors_origin(),
-            "Access-Control-Allow-Headers": CORS_HEADERS_ALL,
-            "Access-Control-Allow-Methods": CORS_METHODS_GET_POST_OPTIONS,
-        },
-        "body": json.dumps(body),
-    }
+    return _success_response(body)

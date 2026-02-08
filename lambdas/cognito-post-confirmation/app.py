@@ -8,6 +8,7 @@ messages or to add custom logic.
 
 #  Copyright (c) 2023.  Suigetsukan Dojo
 
+import logging
 import os
 
 import boto3
@@ -20,6 +21,7 @@ from common.constants import (
     HTTP_OK,
 )
 
+logger = logging.getLogger(__name__)
 REGION = os.environ.get("AWS_REGION", DEFAULT_REGION)
 
 
@@ -99,8 +101,7 @@ def handler(event, context):
     Gets information about the user, including the username and the type of user created,
     also in which user pool. Then, it adds the user in the proper Cognito User Pool group.
     """
-    print(event)
-    print(context)
+    logger.debug("PostConfirmation trigger invoked")
     if not event.get("triggerSource"):
         raise ValueError("Invalid Cognito event: missing triggerSource")
     trigger = event["triggerSource"]
@@ -117,6 +118,6 @@ def handler(event, context):
         add_user_to_cognito_group(user_pool_id, username, COGNITO_GROUP_UNAPPROVED)
         inform_administrators(email, user_pool_id)
     else:
-        print(f"Trigger source: {trigger}. No action taken")
+        logger.info("Trigger source %s: no action taken", trigger)
 
     return event

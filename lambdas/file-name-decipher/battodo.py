@@ -3,6 +3,7 @@ This file handles the Battodo (sword) portion of the suigetsukan-curriculum util
 """
 #  Copyright (c) 2023. Suigetsukan Dojo
 
+import logging
 import os
 import re
 
@@ -29,6 +30,7 @@ from common.battodo_mappings import (
 )
 from common.constants import DDB_INDEX_NAME, DDB_ITEMS_KEY, DDB_MAP_KEY, DDB_VARIATIONS_KEY, HTTP_OK
 
+logger = logging.getLogger(__name__)
 DDB_BATTODO_TABLE = os.environ["AWS_DDB_BATTODO_TABLE_NAME"]
 
 
@@ -549,11 +551,11 @@ def handle_battodo(hls_url):
     :return: Nothing
     """
     my_ddb_table = boto3.resource("dynamodb").Table(DDB_BATTODO_TABLE)
-    stub = utils.get_file_stub(hls_url)
+    stub = utils.get_stub(hls_url)
     if not stub:
         raise RuntimeError("Invalid battodo URL: no file stub")
     scroll_name = get_battodo_scroll_name(stub[0])
-    print(f"scroll_name: {scroll_name}")
+    logger.debug("Processing scroll: %s", scroll_name)
     response = update_ddb(scroll_name, stub, my_ddb_table, hls_url)
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("Failed to update the database")
