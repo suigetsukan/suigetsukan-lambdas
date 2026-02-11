@@ -12,6 +12,7 @@ This document lists sensitive/proprietary information that was redacted from the
 | cognito-post-confirmation | Hardcoded `tennis.suigetsukan@gmail.com` (SES sender) | `AWS_SES_SOURCE_EMAIL` |
 | cognito-post-confirmation | Hardcoded `us-west-1` for Cognito/SES | `AWS_REGION` |
 | file-name-decipher | Hardcoded DynamoDB table names | `AWS_DDB_AIKIDO_TABLE_NAME`, `AWS_DDB_BATTODO_TABLE_NAME`, `AWS_DDB_DANZAN_RYU_TABLE_NAME` |
+| ddb-backup | Region for DynamoDB (us-west-1) | `AWS_REGION` |
 
 ---
 
@@ -54,6 +55,9 @@ Each Lambda's `config.json` defines `env_vars` keys. The deploy script maps thes
 - `AWS_DDB_AIKIDO_TABLE_NAME` — e.g. `Aikido-<stack-id>-staging`
 - `AWS_DDB_BATTODO_TABLE_NAME` — e.g. `Battodo-<stack-id>-staging`
 - `AWS_DDB_DANZAN_RYU_TABLE_NAME` — e.g. `DanzanRyu-<stack-id>-staging`
+
+### ddb-backup
+- `AWS_REGION` — Region for DynamoDB tables (e.g. `us-west-1`). Backs up all tables in this region with retention naming `Suigetsukan-{TABLE_NAME}-{ts}-Project_Retention_90d`. Runs daily via EventBridge schedule.
 
 ---
 

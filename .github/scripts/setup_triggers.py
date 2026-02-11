@@ -182,7 +182,6 @@ def setup_eventbridge_trigger(config, lambda_arn):
     for source in config.get("event_sources", []):
         if source["type"] == "eventbridge":
             event_bus = source["arn"]
-            event_pattern = source["event_pattern"]
             rule_name = (
                 source.get("rule_name") or f"suigetsukan-{config['function_name_suffix']}-Rule"
             )
@@ -190,13 +189,25 @@ def setup_eventbridge_trigger(config, lambda_arn):
                 event_bus_arn = f"arn:aws:events:{REGION}:{ACCOUNT_ID}:event-bus/default"
             else:
                 event_bus_arn = event_bus
-            events_client.put_rule(
-                Name=rule_name,
-                EventPattern=event_pattern,
-                State="ENABLED",
-                EventBusName=event_bus_arn,
-                Description=f"Rule for {config.get('function_name', '')}",
-            )
+
+            schedule_expr = source.get("schedule_expression")
+            if schedule_expr:
+                events_client.put_rule(
+                    Name=rule_name,
+                    ScheduleExpression=schedule_expr,
+                    State="ENABLED",
+                    EventBusName=event_bus_arn,
+                    Description=f"Rule for {config.get('function_name', '')}",
+                )
+            else:
+                event_pattern = source["event_pattern"]
+                events_client.put_rule(
+                    Name=rule_name,
+                    EventPattern=event_pattern,
+                    State="ENABLED",
+                    EventBusName=event_bus_arn,
+                    Description=f"Rule for {config.get('function_name', '')}",
+                )
             rule_arn = f"arn:aws:events:{REGION}:{ACCOUNT_ID}:rule/{rule_name}"
             add_lambda_permission(lambda_arn, rule_arn, f"AllowEventBridge-{rule_name}")
             target_id = "1"

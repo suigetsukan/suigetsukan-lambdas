@@ -58,9 +58,10 @@ def set_leading_zero(number):
     :return: number with leading zero if it is one digit
     :rtype: str
     """
-    if len(str(number)) == 1:
-        number = "0" + str(number)
-    return number
+    s = str(number)
+    if len(s) == 1:
+        return "0" + s
+    return s
 
 
 def get_cost_and_usage(client, year, month):
