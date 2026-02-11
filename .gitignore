@@ -5,6 +5,8 @@ __pycache__/
 .env
 *.log
 .venv/
+.coverage
+htmlcov/
 
 # Local secrets tooling (do not commit)
 scripts/set_org_secrets.sh
