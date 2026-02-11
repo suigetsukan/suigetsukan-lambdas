@@ -150,11 +150,11 @@ def get_this_month_cost(client):
     return get_cost_and_usage(client, current_year, current_month)
 
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """
     The main lambda handler function
     :param event: The event from the ether
-    :param context: The runtime context
+    :param _context: The runtime context (unused)
     :return:  The query response
     :rtype: dict
     """

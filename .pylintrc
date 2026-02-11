@@ -1,0 +1,8 @@
+[MASTER]
+# Add repo root and file-name-decipher so pylint can resolve common.* and same-dir imports
+init-hook='import sys, os; r=os.getcwd(); sys.path.insert(0, r); sys.path.insert(0, os.path.join(r, "lambdas", "file-name-decipher"))'
+
+[MESSAGES CONTROL]
+# R0801 duplicate-code: similar patterns across lambdas are acceptable
+# R0914 too-many-locals: allow in handler dispatch (cognito-rest-api)
+disable=duplicate-code,too-many-locals

@@ -19,6 +19,9 @@ DDB_AIKIDO_TABLE = os.environ["AWS_DDB_AIKIDO_TABLE_NAME"]
 
 
 def locate_technique_in_json(scroll, file_stem, json_data):
+    """
+    Find the index (offset) of the technique in the scroll's json_data from the file_stem.
+    """
     offset = None
     pattern = AIKIDO_REGEX_LOOKUP[scroll]
     parts = re.findall(pattern, file_stem)

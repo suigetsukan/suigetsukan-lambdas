@@ -147,15 +147,15 @@ def compile_users(resp):
     return return_var
 
 
-def get_users_in_group(client, USER_POOL_ID, group_name):
+def get_users_in_group(client, user_pool_id, group_name):
     """
     Get the users in a Cognito user group
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :param group_name: Cognito group name
     :return: List of users in the group
     """
-    response = client.list_users_in_group(UserPoolId=USER_POOL_ID, GroupName=group_name)
+    response = client.list_users_in_group(UserPoolId=user_pool_id, GroupName=group_name)
 
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("An error occurred retrieving the users.")
@@ -163,62 +163,53 @@ def get_users_in_group(client, USER_POOL_ID, group_name):
     return compile_users(response)
 
 
-def add_user_to_group(client, USER_POOL_ID, user_name, group_name):
+def add_user_to_group(client, user_pool_id, user_name, group_name):
     """
     Add a user to a Cognito user group
 
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :param user_name: Cognito user name
     :param group_name: Cognito group name
     :return: Nothing
     """
     response = client.admin_add_user_to_group(
-        UserPoolId=USER_POOL_ID, Username=user_name, GroupName=group_name
+        UserPoolId=user_pool_id, Username=user_name, GroupName=group_name
     )
 
-    # Check the response
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError(f"Error adding user {user_name} to group {group_name}.")
 
-    return
 
-
-def remove_user_from_group(client, USER_POOL_ID, user_name, group_name):
+def remove_user_from_group(client, user_pool_id, user_name, group_name):
     """
      Remove a user from a Cognito user group
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :param user_name: Cognito user name
     :param group_name: Cognito group name
     :return: Nothing
     """
     response = client.admin_remove_user_from_group(
-        UserPoolId=USER_POOL_ID, Username=user_name, GroupName=group_name
+        UserPoolId=user_pool_id, Username=user_name, GroupName=group_name
     )
 
-    # Check the response
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("An error occurred removing the user from the group.")
 
-    return
 
-
-def delete_user_completely(client, USER_POOL_ID, user_name):
+def delete_user_completely(client, user_pool_id, user_name):
     """
     Delete a Cognito user
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :param user_name: Cognito user name
     :return: Nothing
     """
-    response = client.admin_delete_user(UserPoolId=USER_POOL_ID, Username=user_name)
+    response = client.admin_delete_user(UserPoolId=user_pool_id, Username=user_name)
 
-    # Check the response
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("An error occurred deleting the user.")
-
-    return
 
 
 def send_mail(addresses, subject, body):
@@ -231,7 +222,7 @@ def send_mail(addresses, subject, body):
     """
     ses_region = os.environ.get("SES_REGION", os.environ.get("AWS_REGION", DEFAULT_REGION))
     ses_client = boto3.client("ses", region_name=ses_region)
-    SES_SOURCE_EMAIL = os.environ["AWS_SES_SOURCE_EMAIL"]
+    ses_source_email = os.environ["AWS_SES_SOURCE_EMAIL"]
 
     response = ses_client.send_email(
         Destination={
@@ -249,22 +240,20 @@ def send_mail(addresses, subject, body):
                 "Data": subject,
             },
         },
-        Source=SES_SOURCE_EMAIL,
+        Source=ses_source_email,
     )
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError(f"An error occurred sending email to {addresses}.")
 
-    return
 
-
-def get_all_users(client, USER_POOL_ID):
+def get_all_users(client, user_pool_id):
     """
     Get all users in all Cognito user pools
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return: List of users
     """
-    response = client.list_users(UserPoolId=USER_POOL_ID)
+    response = client.list_users(UserPoolId=user_pool_id)
 
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("An error occurred retrieving all users.")
@@ -291,14 +280,14 @@ def compile_emails(resp):
     return admin_emails
 
 
-def get_admin_users(client, USER_POOL_ID):
+def get_admin_users(client, user_pool_id):
     """
     Get admin users in Cognito user pool
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return: List of users
     """
-    response = client.list_users_in_group(UserPoolId=USER_POOL_ID, GroupName=COGNITO_GROUP_ADMIN)
+    response = client.list_users_in_group(UserPoolId=user_pool_id, GroupName=COGNITO_GROUP_ADMIN)
 
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError("An error occurred retrieving the admin users.")
@@ -306,16 +295,16 @@ def get_admin_users(client, USER_POOL_ID):
     return compile_emails(response)
 
 
-def list_handler(client, USER_POOL_ID):
+def list_handler(client, user_pool_id):
     """
     List all Cognito users
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return: JSON object of users
     """
-    all_users = get_all_users(client, USER_POOL_ID)
-    unapproved_users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_UNAPPROVED)
-    approved_users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_APPROVED)
+    all_users = get_all_users(client, user_pool_id)
+    unapproved_users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_UNAPPROVED)
+    approved_users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_APPROVED)
     unapproved_set = {(u["user_name"], u["email"]) for u in unapproved_users}
     approved_set = {(u["user_name"], u["email"]) for u in approved_users}
     other_users = [
@@ -338,20 +327,20 @@ def list_handler(client, USER_POOL_ID):
     return body
 
 
-def approve_handler(user_name, client, USER_POOL_ID):
+def approve_handler(user_name, client, user_pool_id):
     """
     Approve a Cognito user
     :param user_name: Cognito user name
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return: JSON object
     """
     body = None
-    users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_UNAPPROVED)
+    users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_UNAPPROVED)
     for user in users:
         if user["user_name"] == user_name:
-            remove_user_from_group(client, USER_POOL_ID, user_name, COGNITO_GROUP_UNAPPROVED)
-            add_user_to_group(client, USER_POOL_ID, user_name, COGNITO_GROUP_APPROVED)
+            remove_user_from_group(client, user_pool_id, user_name, COGNITO_GROUP_UNAPPROVED)
+            add_user_to_group(client, user_pool_id, user_name, COGNITO_GROUP_APPROVED)
             email = user["email"]
             send_mail(
                 [email],
@@ -368,19 +357,19 @@ def approve_handler(user_name, client, USER_POOL_ID):
     return body
 
 
-def promote_handler(user_name, client, USER_POOL_ID):
+def promote_handler(user_name, client, user_pool_id):
     """
     Promote a Cognito user
     :param user_name: Cognito user name
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return: JSON object
     """
     body = None
-    users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_APPROVED)
+    users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_APPROVED)
     for user in users:
         if user["user_name"] == user_name:
-            add_user_to_group(client, USER_POOL_ID, user_name, COGNITO_GROUP_ADMIN)
+            add_user_to_group(client, user_pool_id, user_name, COGNITO_GROUP_ADMIN)
             email = user["email"]
             send_mail(
                 [email],
@@ -397,19 +386,19 @@ def promote_handler(user_name, client, USER_POOL_ID):
     return body
 
 
-def deny_handler(user_name, client, USER_POOL_ID):
+def deny_handler(user_name, client, user_pool_id):
     """
     Deny access to a Cognito user
     :param user_name: Cognito user name
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return: JSON object
     """
-    users = get_users_in_group(client, USER_POOL_ID, COGNITO_GROUP_UNAPPROVED)
+    users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_UNAPPROVED)
     body = None
     for user in users:
         if user["user_name"] == user_name:
-            delete_user_completely(client, USER_POOL_ID, user_name)
+            delete_user_completely(client, user_pool_id, user_name)
             email = user["email"]
             send_mail(
                 [email],
@@ -426,19 +415,19 @@ def deny_handler(user_name, client, USER_POOL_ID):
     return body
 
 
-def close_handler(user_name, client, USER_POOL_ID):
+def close_handler(user_name, client, user_pool_id):
     """
     Close a Cognito user account
     :param user_name: Cognito user name
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return: JSON object
     """
-    users = get_all_users(client, USER_POOL_ID)
+    users = get_all_users(client, user_pool_id)
     body = None
     for user in users:
         if user["user_name"] == user_name:
-            delete_user_completely(client, USER_POOL_ID, user_name)
+            delete_user_completely(client, user_pool_id, user_name)
             email = user["email"]
             send_mail(
                 [email],
@@ -455,16 +444,16 @@ def close_handler(user_name, client, USER_POOL_ID):
     return body
 
 
-def delete_handler(user_name, client, USER_POOL_ID):
+def delete_handler(user_name, client, user_pool_id):
     """
      Delete a Cognito user
 
     :param user_name: Cognito user name
     :param client: Cognito client
-    :param USER_POOL_ID: Cognito user pool id
+    :param user_pool_id: Cognito user pool id
     :return:  Nothing
     """
-    users = get_all_users(client, USER_POOL_ID)
+    users = get_all_users(client, user_pool_id)
     email = None
     for user in users:
         if user["user_name"] == user_name:
@@ -472,7 +461,7 @@ def delete_handler(user_name, client, USER_POOL_ID):
             break
     if not email:
         raise RuntimeError("User not found for deletion")
-    delete_user_completely(client, USER_POOL_ID, user_name)
+    delete_user_completely(client, user_pool_id, user_name)
     send_mail(
         [email],
         "Suigetsukan Curriculum Account Deleted!",
@@ -482,7 +471,10 @@ def delete_handler(user_name, client, USER_POOL_ID):
     return f"The user {email} account has been deleted"
 
 
-def handler(event, context):
+def handler(event, _context):
+    """
+    API Gateway handler: routes GET/POST/OPTIONS to Cognito user management.
+    """
     logger.debug("Request received: %s %s", event.get("httpMethod"), event.get("path"))
     if not event.get("httpMethod") or not event.get("path"):
         return _error_response(HTTP_BAD_REQUEST, "Missing httpMethod or path")

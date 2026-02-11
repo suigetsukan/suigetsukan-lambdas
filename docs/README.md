@@ -33,3 +33,5 @@ This Lambda is invoked by SNS notifications (e.g. from MediaConvert or another v
 3. Ensure the Lambda has permission to receive SNS (the role gets `AmazonSNSFullAccess` via deploy_roles).
 
 Event payloads: `Subject` contains "Complete", "Direct", or "Ingest". For "Complete", `Message` is JSON with `hlsUrl`. For "Direct", `Message` is the raw URL.
+
+See [FILE_NAMING_CONVENTIONS.md](FILE_NAMING_CONVENTIONS.md) for input file naming conventions by art (Aikido, Battodo, Danzan Ryu).

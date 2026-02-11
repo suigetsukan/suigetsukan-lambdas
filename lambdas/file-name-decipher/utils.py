@@ -38,7 +38,9 @@ def find_two_datapoints_item_offset(label1, value1, label2, value2, json_data):
     raise RuntimeError("Could not find valid offset values for 2 labels/values")
 
 
-def find_three_datapoints_item_offset(label1, value1, label2, value2, label3, value3, json_data):
+def find_three_datapoints_item_offset(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    label1, value1, label2, value2, label3, value3, json_data
+):
     """
     Find the offset of the first item in the json data that matches the labels and values
 

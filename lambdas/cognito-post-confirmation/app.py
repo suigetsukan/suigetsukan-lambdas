@@ -37,8 +37,6 @@ def add_user_to_cognito_group(user_pool_id, username, group_name):
     if response["ResponseMetadata"]["HTTPStatusCode"] != HTTP_OK:
         raise RuntimeError(f"An error occurred adding user {username} to group {group_name}.")
 
-    return
-
 
 def compile_emails(resp):
     """
@@ -81,10 +79,10 @@ def inform_administrators(email, pool_id):
 
     ses_region = os.environ.get("SES_REGION", REGION)
     ses_client = boto3.client("ses", region_name=ses_region)
-    SES_SOURCE_EMAIL = os.environ["AWS_SES_SOURCE_EMAIL"]
+    ses_source_email = os.environ["AWS_SES_SOURCE_EMAIL"]
 
     response = ses_client.send_email(
-        Source=SES_SOURCE_EMAIL,
+        Source=ses_source_email,
         Destination={"ToAddresses": admin_users},
         Message={
             "Subject": {"Data": f"New user: {email}"},
@@ -96,7 +94,7 @@ def inform_administrators(email, pool_id):
     return True
 
 
-def handler(event, context):
+def handler(event, _context):
     """
     Gets information about the user, including the username and the type of user created,
     also in which user pool. Then, it adds the user in the proper Cognito User Pool group.
@@ -113,7 +111,8 @@ def handler(event, context):
         email = user_attrs.get("email")
         if not all([username, user_pool_id, email]):
             raise ValueError(
-                "Invalid Cognito event: missing userName, userPoolId, or request.userAttributes.email"
+                "Invalid Cognito event: missing userName, userPoolId, or "
+                "request.userAttributes.email"
             )
         add_user_to_cognito_group(user_pool_id, username, COGNITO_GROUP_UNAPPROVED)
         inform_administrators(email, user_pool_id)
