@@ -1,5 +1,7 @@
 # Single pipeline: validate/lint on every push and PR; reconcile orgs on push only.
 # Reconcile requires repo secret GH_TOKEN (PAT with repo + read:org and push access to org repos and this repo).
+#
+# Tests run once in the validate job (this repo only). Reconcile does not run tests in any target repo.
 
 name: Pipeline
 
@@ -35,24 +37,8 @@ jobs:
       - name: Validate .mdc frontmatter
         run: python scripts/validate_mdc.py
 
-      - name: Run unit tests
+      - name: Run unit tests (once; not run per target repo)
         run: python -m pytest tests/ -v
-
-  install-script:
-    name: Install script (bats)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Bats
-        uses: bats-core/bats-action@v3.0.1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run install.sh tests
-        run: bats tests/install.bats
 
   markdown:
     name: Markdown lint
@@ -72,6 +58,7 @@ jobs:
     name: Reconcile orgs
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    # No tests run here; install-org.sh only runs install.sh per repo (no pytest in target repos).
 
     steps:
       - name: Checkout

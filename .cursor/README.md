@@ -146,7 +146,7 @@ Run manually: `pre-commit run --all-files`
 ### CI
 
 GitHub Actions runs on push/PR: validates `.mdc` frontmatter (description, alwaysApply or globs), markdownlint,
-pytest, and bats tests for `install.sh`.
+and pytest (including tests for `install.sh`). The `tests/` directory is used only in this repo (and in CI). Tests run once in this repo to establish reliability; reconciliation does not run tests in any target repo. The `tests/` directory is not installed into projects’ `.cursor/` (see install script).
 
 ### Validate rules manually
 
@@ -156,10 +156,10 @@ python scripts/validate_mdc.py --rules-dir /path/to/rules
 RULES_DIR=/path/to/rules python scripts/validate_mdc.py
 ```
 
-### Install script tests (bats)
+### Install script tests
 
 ```bash
-bats tests/install.bats
+python -m pytest tests/test_install.py -v
 ```
 
 ### Adding a new rule

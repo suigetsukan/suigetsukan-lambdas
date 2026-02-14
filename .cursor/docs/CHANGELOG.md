@@ -2,13 +2,14 @@
 
 ## Unreleased
 
+- Replace bats with pytest for install.sh tests (test_install.py); remove bats-core/bats-action from CI
 - validate_mdc: clarify globs error message ("currently empty"); add --rules-dir and RULES_DIR
 - validate_mdc: support globs as YAML string or array (Cursor accepts both)
 - Add requirements-dev.txt with pre-commit
 - Add pyproject.toml (pytest config, project metadata)
-- Add bats tests for install.sh (5 tests)
-- Add bats CI job
-- README: pre-commit run --all-files, requirements-dev, validate_mdc usage, bats tests
+- Add bats tests for install.sh (5 tests) → superseded by pytest test_install.py
+- Add bats CI job → removed (install tests now in validate job via pytest)
+- README: pre-commit run --all-files, requirements-dev, validate_mdc usage, install script tests
 
 ## 2026-02-08 (fixes)
 
