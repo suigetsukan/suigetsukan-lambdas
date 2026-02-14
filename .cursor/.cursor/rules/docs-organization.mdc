@@ -1,0 +1,22 @@
+---
+description: Organize and maintain the docs directory
+globs: docs/**
+alwaysApply: false
+---
+
+# Docs directory: organize and keep it so
+
+When the project has a `docs/` directory:
+
+1. **Organize it**
+   - Use a clear structure (e.g. by topic, user journey, or type: guides, reference, architecture).
+   - Prefer a flat or shallow hierarchy; avoid deep nesting unless necessary.
+   - Use consistent naming: lowercase, hyphens for multi-word files (e.g. `getting-started.md`, `api-reference.md`).
+   - Add a top-level `README.md` or `index.md` that explains the structure and links to main sections.
+
+2. **Keep it organized**
+   - When adding new docs, place them in the right section and follow the existing naming and structure.
+   - When changing or removing docs, update indexes and links so nothing is broken or orphaned.
+   - Prefer updating existing docs over creating overlapping new ones; consolidate when it makes sense.
+
+Apply this rule whenever creating, editing, or refactoring content under `docs/`.

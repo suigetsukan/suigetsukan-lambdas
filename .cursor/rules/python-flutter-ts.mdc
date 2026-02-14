@@ -1,0 +1,35 @@
+---
+description: Python, Flutter/Dart, TypeScript/Vue language-specific rules
+globs: "**/*.py,**/*.dart,**/*.ts,**/*.tsx,**/*.vue"
+alwaysApply: false
+---
+
+# Language-Specific Rules
+
+Compiled from C2DS-cognator, c2ds_mobile_provisioning_app, C2DS-mother-hen-api-stack, ESPConnect AGENTS.md.
+
+**Note:** Flutter/Dart and TypeScript/Vue sections include defaults from Mother Hen mobile app and ESPConnect.
+Omit or adapt project-specific items (e.g. door states, Vuetify) for other projects.
+
+## Python (Cognator, API Stack, Lambdas)
+
+- **Tests:** All tests MUST pass before committing. Run `python -m pytest` before every commit.
+  Never commit or deploy with broken tests.
+- **Prefer:** Clarity over cleverness. Determinism over cleverness.
+- **Do not:** Store unbounded history. Invent new rules. Encode business logic in messaging.
+- **Documentation:** Create new .md files in `docs/`. Only README.md and AGENTS.md in root.
+
+## Flutter/Dart (Mobile App)
+
+- **Commit format:** Use conventional commits (feat:, fix:, perf:, docs:, chore:)
+- **API contract:** Mobile app is bound to the API contract. Adapt to API, never modify API code from mobile app context.
+- **Secrets:** Debug-only behaviors must not ship. Never log secrets in release builds.
+- **Truth model:** Door states must include lastConfirmedAt and freshness. Display UNKNOWN when stale beyond TTL.
+
+## TypeScript/Vue (ESPConnect)
+
+- **Vue 3:** Composition API only. No Options API.
+- **TypeScript:** Required.
+- **UI:** Vuetify. No direct DOM manipulation. No MutationObservers.
+- **i18n:** All UI text must use Vue I18n. No hardcoded UI strings. Serial/device output never translated.
+- **Philosophy:** Prefer clarity over cleverness. Keep diffs minimal. One feature/fix at a time.

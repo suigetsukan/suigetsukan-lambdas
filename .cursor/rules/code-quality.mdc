@@ -1,0 +1,81 @@
+---
+description: Core code quality constraints - cyclomatic complexity, parameters, memory safety, error handling
+alwaysApply: true
+---
+
+# Code Quality Standards
+
+Compiled from AGENTS.md across ~/src projects. These rules apply to all code changes.
+
+## Cyclomatic Complexity
+
+**Rule:** All functions MUST have cyclomatic complexity ≤ 10
+
+**Rationale:** Improves testability, reduces bug probability, enhances maintainability.
+
+**Refactoring when exceeded:**
+
+1. Extract helper functions for complex logic
+2. Use early returns to reduce nesting
+3. Split functions by responsibility
+4. Replace complex conditionals with strategy patterns
+5. Break down switch statements with lookup tables
+
+## Function Parameters
+
+**Rule:** All functions MUST have ≤ 7 parameters
+
+**Rationale:** Functions with >7 parameters are hard to understand and suggest poor cohesion.
+
+**Refactoring when exceeded:**
+
+1. Group related parameters into structs
+2. Use configuration objects
+3. Split function into multiple smaller functions
+
+## Memory Safety
+
+**Rules:**
+
+- All heap allocations MUST have corresponding frees
+- Check all malloc/calloc return values
+- Initialize all pointers
+- Validate all buffer operations for overflow
+
+## Error Handling
+
+**Rules:**
+
+- Check ALL function return values
+- Log all errors with appropriate severity before returning
+- Clean up resources on error paths
+- Use early returns for error conditions
+- Never silently ignore errors
+
+## Thread Safety
+
+**Rules:**
+
+- All global variables MUST be protected by mutex/semaphore
+- Document thread-safety guarantees of functions
+- Use timeout-based mutex acquisition (avoid deadlocks)
+- Prefer immutable data where possible
+
+## Code Structure Guidelines
+
+- Maximum function length: 50 lines (guideline)
+- Maximum file length: 1000 lines (guideline)
+- One responsibility per function
+- Consistent naming conventions
+- Clear separation of concerns
+
+## AI Agent Refactoring Rules
+
+When refactoring to meet these standards:
+
+1. **Always preserve functionality** - no behavioral changes
+2. **Extract before you expand** - create helper functions first
+3. **Name helpers descriptively** - make their purpose obvious
+4. **Keep related code together** - group helpers near their callers
+5. **Document complex logic** - add comments for non-obvious code
+6. **Test after refactoring** - ensure code still compiles and works

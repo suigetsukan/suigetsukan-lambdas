@@ -1,0 +1,20 @@
+---
+description: Security rules - no hardcoded credentials, input validation
+alwaysApply: true
+---
+
+# Security Rules
+
+Compiled from C2DS-brood, C2DS-bootstrap, GGG-*, ELSL-* AGENTS.md.
+
+## Credentials and Secrets
+
+- **NEVER** hardcode credentials, passwords, API keys, or tokens
+- **NEVER** log sensitive data (passwords, private keys, certs) in any build
+- Keep certificates in `.gitignore`d directories
+
+## Input Validation
+
+- Validate all external inputs (NULL checks, bounds checks)
+- Validate all buffer operations for overflow
+- Reject invalid device IDs, malformed JSON, etc.

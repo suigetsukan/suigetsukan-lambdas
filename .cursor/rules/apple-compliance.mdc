@@ -1,0 +1,32 @@
+---
+description: Apple App Store / iOS compliance guardrails (Mother Hen)
+alwaysApply: true
+---
+
+# Apple Compliance Guardrails (iOS + App Store Review)
+
+Use these guardrails when adding or changing features to minimize App Store review risk.
+
+## Privacy + Data Use
+
+- **Privacy manifest**: If adding/upgrading plugins or using new iOS APIs, ensure `ios/Runner/PrivacyInfo.xcprivacy` exists and is updated for any “required reason” APIs used by the app or dependencies.
+- **Data minimization**: Don’t collect/log/store extra identifiers (SSID, MACs, emails) unless required for the feature. Prefer redaction and secure storage for sensitive data.
+- **In-app links**: Ensure the app has user-visible links to **Privacy Policy** and **Terms of Service** (typically in Settings/About).
+
+## Permissions (Bluetooth / Location / Camera / Local Network)
+
+- **Just-in-time prompts**: Show a short pre-permission explanation screen (what + why) before triggering OS permission dialogs.
+- **Request the minimum**: Only request permissions the app truly uses. Avoid “Always” location unless the feature requires it and is clearly justified.
+- **Deny path**: If permission is denied, provide a clear fallback and a single “Open Settings” action (don’t loop prompts).
+- **Local Network**: Only include Bonjour services you actually use (avoid debug/irrelevant service types).
+
+## Logging, Errors, and Release Hygiene
+
+- **No raw exceptions to users**: User-facing errors must be friendly and action-oriented; log technical details privately.
+- **No sensitive logs in release**: Tokens, passwords, emails, MACs, SSIDs, certificates/keys must never be logged in release builds.
+- **Debug-only UI**: Developer/debug pages must be gated by `kDebugMode` and not reachable in release builds.
+
+## Copy / UX (avoid rejection-prone language)
+
+- **No guarantees**: Avoid “all clear”, “safe/secure/protected/prevents/ensures”, or absolute readiness claims. Prefer neutral, observable status + timestamps/freshness.
+- **Account flows**: If login is required, ensure App Review can access the app (test credentials or a review/demo mode) and provide clear error states.

@@ -1,0 +1,13 @@
+---
+description: AWS profile and region when interacting with AWS
+alwaysApply: true
+---
+
+# AWS Context
+
+When interacting with AWS (CLI, SDK, IaC, scripts):
+
+- **Profile**: `tennis@charliesfarm`
+- **Region**: `us-east-2`
+
+Use these by default in commands, config, and code (e.g. `--profile tennis@charliesfarm`, `AWS_REGION=us-east-2`, or equivalent in SDK/IaC).

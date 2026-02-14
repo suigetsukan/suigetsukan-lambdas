@@ -1,0 +1,33 @@
+---
+description: Markdown and documentation file organization
+alwaysApply: true
+---
+
+# File Organization
+
+Compiled from C2DS-brood, C2DS-bootstrap, gecl-app-common, dot_shellrc, c2ds_mobile_provisioning_app AGENTS.md.
+
+## Markdown Files
+
+**Rule:** All `.md` files belong in `docs/` directory.
+
+**Exceptions (stay in root only):**
+
+- `README.md` - Project overview
+- `AGENTS.md` - AI agent instructions
+
+**Place in docs/:**
+
+- Design docs, guides, standards
+- Implementation notes
+- Architecture documentation
+- Coding standards
+
+## AI Rules
+
+- If project uses `.ai-rules/` - keep rules there
+- If project uses `.cursor/rules/` - keep rules there
+
+## Scripts
+
+- Keep in `scripts/`, `tools/`, or `bin/` directory

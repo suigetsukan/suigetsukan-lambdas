@@ -1,0 +1,10 @@
+[project]
+name = "cursor-settings"
+version = "0.1.0"
+description = "Shared Cursor IDE rules for all development work"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

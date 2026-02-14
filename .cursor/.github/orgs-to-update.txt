@@ -1,0 +1,8 @@
+# One org per line. Blank lines and # comments are ignored.
+# Add org names below; the Pipeline workflow runs install-org.sh for each on push to main/master.
+#
+chicken-coop-door-status
+gamename-esp32-component-library
+gamename-infrastructure
+kilohanausa
+suigetsukan

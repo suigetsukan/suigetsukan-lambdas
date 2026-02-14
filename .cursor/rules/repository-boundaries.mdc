@@ -1,0 +1,26 @@
+---
+description: Repository boundaries - protected dirs, git workflow, preferred tools
+alwaysApply: true
+---
+
+# Repository Boundaries
+
+Compiled from C2DS-brood, C2DS-bootstrap, GGG-*, ELSL-* AGENTS.md.
+
+## DO NOT MODIFY
+
+**Never edit files in these directories:**
+
+- `build/` - Generated build artifacts
+- `.git/` - Git internal files
+
+## Git Workflow
+
+- **NEVER** force push to main/master
+- **NEVER** skip hooks (--no-verify) without explicit user consent
+- **NEVER** commit unless user explicitly requests it
+
+## Preferred Tools
+
+- Use `rg` (ripgrep) for searching codebase
+- Use `python3` for scripts

@@ -1,0 +1,9 @@
+---
+description: Favor available libraries over custom code; prefer local Mother Hen libs when applicable
+alwaysApply: true
+---
+
+# Prefer Libraries
+
+- **Always** favor existing libraries and packages for functionality before writing custom code.
+- In the context of **Mother Hen**, prefer using local Mother Hen libraries over external or custom implementations when they provide the needed functionality.
