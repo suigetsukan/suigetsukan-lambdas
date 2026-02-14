@@ -20,10 +20,10 @@ if [ "$TARGET_DIR" = "$CURSOR_SETTINGS_ROOT" ]; then
   exit 1
 fi
 
-# Sync repo into .cursor. Exclude .git and tests/ (tests are for cursor-settings dev/CI only, not for installed copy).
+# Sync repo into .cursor. Exclude .git, tests/, and .github/ (CI lives in this repo only; not for installed copy).
 if [ -e .cursor ] && [ -f .cursor/"$MARKER" ]; then
   # Already our install: rsync to update, leave user additions intact
-  rsync -a --exclude='.git' --exclude='tests' "$CURSOR_SETTINGS_ROOT/" .cursor/
+  rsync -a --exclude='.git' --exclude='tests' --exclude='.github' "$CURSOR_SETTINGS_ROOT/" .cursor/
   echo "Updated cursor-settings in .cursor"
 else
   # Fresh install or unknown .cursor
@@ -33,6 +33,6 @@ else
     echo "Moved existing .cursor to d0t_cursor_0ld"
   fi
   mkdir -p .cursor
-  rsync -a --exclude='.git' --exclude='tests' "$CURSOR_SETTINGS_ROOT/" .cursor/
+  rsync -a --exclude='.git' --exclude='tests' --exclude='.github' "$CURSOR_SETTINGS_ROOT/" .cursor/
   echo "Installed cursor-settings to .cursor"
 fi

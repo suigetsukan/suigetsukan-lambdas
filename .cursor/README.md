@@ -58,6 +58,8 @@ Reconciliation can run automatically on push to main/master: add org names (one 
 
 **How org reconciliation works:** On push to main/master the Pipeline's reconcile job runs `install-org.sh` which is the single source of truth: it clones org repos with a shallow, sparse checkout (only the `.cursor` directory is checked out; no full history or other files). If a repo’s `.cursor` already matches current cursor-settings, it is skipped. Otherwise the script runs `install.sh` to sync content, then commits and pushes only the `.cursor` tree. If a repo had diverged from master, a PR is opened to this repo to propose those changes before overwriting.
 
+If target repos still have bats in their workflows: run `scripts/remove-bats-from-org-repos.sh <org>` to report which repos have it; use `--fix` to remove the bats job and push. Use `--all-orgs` to scan orgs from `.github/orgs-to-update.txt`.
+
 ### Clone a project that already has the submodule
 
 Use `--recurse-submodules` so the submodule is fetched (requires access to both repos):
