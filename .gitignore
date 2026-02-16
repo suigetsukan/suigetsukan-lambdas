@@ -11,3 +11,4 @@ htmlcov/
 # Local secrets tooling (do not commit)
 scripts/set_org_secrets.sh
 scripts/org-secrets.env
+0ld_dot_cursor/
