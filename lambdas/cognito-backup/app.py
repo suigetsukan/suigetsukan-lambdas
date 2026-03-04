@@ -68,7 +68,14 @@ def validate_backup_in_s3(s3_client, bucket, key):
     except (OSError, json.JSONDecodeError) as e:
         raise ValueError(f"Backup decompress or JSON parse failed: {e}") from e
 
-    required = ("timestamp", "COGNITO_USER_POOL_ID", "total_users", "users", "groups", "pool_metadata")
+    required = (
+        "timestamp",
+        "COGNITO_USER_POOL_ID",
+        "total_users",
+        "users",
+        "groups",
+        "pool_metadata",
+    )
     for field in required:
         if field not in data:
             raise ValueError(f"Backup missing required field: {field}")

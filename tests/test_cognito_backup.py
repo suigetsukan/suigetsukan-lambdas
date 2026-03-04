@@ -104,7 +104,9 @@ def _assert_backup_success(result, mock_s3, mock_cloudwatch):
     assert put_calls[1].kwargs["Key"] == "backups/latest/manifest.json"
     manifest_body = json.loads(put_calls[1].kwargs["Body"].decode("utf-8"))
     assert manifest_body["backup_key"] == result["backup_key"] and manifest_body["total_users"] == 1
-    get_calls = [c for c in mock_s3.get_object.call_args_list if c.kwargs.get("Key") == result["backup_key"]]
+    get_calls = [
+        c for c in mock_s3.get_object.call_args_list if c.kwargs.get("Key") == result["backup_key"]
+    ]
     assert len(get_calls) >= 1
     call_kw = mock_cloudwatch.put_metric_data.call_args.kwargs
     assert call_kw["Namespace"] == "CognitoBackup"
