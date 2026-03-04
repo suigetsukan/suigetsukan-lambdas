@@ -158,6 +158,8 @@ jobs:
           # Lambda-specific env vars (from config.json; use same names as secrets)
           AWS_SES_SOURCE_EMAIL: ${{ secrets.AWS_SES_SOURCE_EMAIL }}
           AWS_COGNITO_USER_POOL_ID: ${{ secrets.AWS_COGNITO_USER_POOL_ID }}
+          AWS_S3_BACKUP_BUCKET: ${{ secrets.AWS_S3_BACKUP_BUCKET }}
+          SNS_SUPPORT_TOPIC_ARN: ${{ secrets.SNS_SUPPORT_TOPIC_ARN }}
           AWS_DDB_AIKIDO_TABLE_NAME: ${{ secrets.AWS_DDB_AIKIDO_TABLE_NAME }}
           AWS_DDB_BATTODO_TABLE_NAME: ${{ secrets.AWS_DDB_BATTODO_TABLE_NAME }}
           AWS_DDB_DANZAN_RYU_TABLE_NAME: ${{ secrets.AWS_DDB_DANZAN_RYU_TABLE_NAME }}

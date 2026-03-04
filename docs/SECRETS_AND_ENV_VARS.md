@@ -12,7 +12,7 @@ This document lists sensitive/proprietary information that was redacted from the
 | cognito-post-confirmation | Hardcoded `tennis.suigetsukan@gmail.com` (SES sender) | `AWS_SES_SOURCE_EMAIL` |
 | cognito-post-confirmation | Hardcoded `us-west-1` for Cognito/SES | `AWS_REGION` |
 | file-name-decipher | Hardcoded DynamoDB table names | `AWS_DDB_AIKIDO_TABLE_NAME`, `AWS_DDB_BATTODO_TABLE_NAME`, `AWS_DDB_DANZAN_RYU_TABLE_NAME` |
-| ddb-backup | Region for DynamoDB (us-west-1) | `AWS_REGION` |
+| cognito-backup | Cognito User Pool ID, S3 bucket, optional SNS | `AWS_COGNITO_USER_POOL_ID`, `AWS_S3_BACKUP_BUCKET`, `SNS_SUPPORT_TOPIC_ARN` (optional) |
 
 ---
 
@@ -32,6 +32,8 @@ Add these to your GitHub repository secrets (Settings → Secrets and variables 
 | `AWS_DDB_BATTODO_TABLE_NAME` | DynamoDB table for Battodo curriculum | file-name-decipher |
 | `AWS_DDB_DANZAN_RYU_TABLE_NAME` | DynamoDB table for Danzan Ryu curriculum | file-name-decipher |
 | `CORS_ALLOWED_ORIGIN` | Restrict CORS origin (optional; default `*`) | cognito-rest-api, billing-rest-api |
+| `AWS_S3_BACKUP_BUCKET` | S3 bucket for Cognito backups (must exist). Retention via **S3 lifecycle only**: add rule for prefix `backups/`, expire after 365 days | cognito-backup |
+| `SNS_SUPPORT_TOPIC_ARN` | SNS topic for Cognito backup failure alerts (optional) | cognito-backup |
 
 ---
 
@@ -56,8 +58,16 @@ Each Lambda's `config.json` defines `env_vars` keys. The deploy script maps thes
 - `AWS_DDB_BATTODO_TABLE_NAME` — e.g. `Battodo-<stack-id>-staging`
 - `AWS_DDB_DANZAN_RYU_TABLE_NAME` — e.g. `DanzanRyu-<stack-id>-staging`
 
-### ddb-backup
-- `AWS_REGION` — Region for DynamoDB tables (e.g. `us-west-1`). Backs up all tables in this region with retention naming `Suigetsukan-{TABLE_NAME}-{ts}-Project_Retention_90d`. Runs daily via EventBridge schedule.
+### DynamoDB backup (AWS Backup, not a Lambda)
+DynamoDB is backed up by **AWS Backup** in **us-west-1**: **all** tables in the region (wildcard `table/*`; new tables included automatically), weekly schedule, 1-year retention (automatic prune). Either run the one-time script `scripts/setup_aws_backup_dynamodb.py` with `AWS_PROFILE=tennis@suigetsukan` and `AWS_REGION=us-west-1`, or deploy the CloudFormation template `infra/aws-backup-dynamodb.yaml` (see header comments for the deploy command). Ensure DynamoDB is opted in for AWS Backup in that region (Console: AWS Backup → Settings → Service opt-in). No Lambda or GitHub secrets required for DynamoDB backup.
+
+### cognito-backup
+- `AWS_REGION` — Region (e.g. **us-west-1**). Deploy uses profile **tennis@suigetsukan** and region **us-west-1** (or set `AWS_REGION` in CI).
+- `AWS_COGNITO_USER_POOL_ID` — Cognito User Pool to export.
+- `AWS_S3_BACKUP_BUCKET` — S3 bucket for exports. The bucket must exist and be writable by the Lambda. **Retention:** Use **S3 lifecycle rules only** (e.g. lifecycle rule on prefix `backups/`, expire after 365 days). No pruning script. Output: gzip-compressed backups at `backups/YYYY/MM/DD/cognito-users-{timestamp}.json.gz`, manifest at `backups/latest/manifest.json`. After each upload the backup is validated (re-download, decompress, structure check); CloudWatch metrics (namespace `CognitoBackup`: TotalUsers, ExecutionDuration) are published.
+- `SNS_SUPPORT_TOPIC_ARN` (optional) — ARN of SNS topic for error notifications on backup failure.
+
+No passwords are exported; restore requires users to reset password or use invite flow.
 
 ---
 

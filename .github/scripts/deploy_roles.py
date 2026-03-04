@@ -66,6 +66,7 @@ def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
 
             policy_map = {
                 "ce": "arn:aws:iam::aws:policy/AWSCostExplorerReadOnlyAccess",
+                "cloudwatch": "arn:aws:iam::aws:policy/CloudWatchFullAccess",
                 "cognito-idp": "arn:aws:iam::aws:policy/AmazonCognitoPowerUser",
                 "dynamodb": "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
                 "iot": "arn:aws:iam::aws:policy/AWSIoTFullAccess",

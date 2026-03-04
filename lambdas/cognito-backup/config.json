@@ -1,0 +1,27 @@
+{
+  "function_name_suffix": "cognito-backup",
+  "function_name": "suigetsukan-cognito-backup",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 300,
+  "memory_size": 256,
+  "env_vars": {
+    "AWS_REGION": "us-west-1",
+    "AWS_COGNITO_USER_POOL_ID": "placeholder",
+    "AWS_S3_BACKUP_BUCKET": "placeholder",
+    "SNS_SUPPORT_TOPIC_ARN": "optional"
+  },
+  "optional_env_vars": ["SNS_SUPPORT_TOPIC_ARN"],
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "role_name": "suigetsukan-cognito-backup-role",
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"],
+  "event_sources": [
+    {
+      "type": "eventbridge",
+      "arn": "default",
+      "schedule_expression": "cron(0 3 * * ? *)",
+      "rule_name": "suigetsukan-cognito-backup-Schedule"
+    }
+  ]
+}
