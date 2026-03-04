@@ -6,6 +6,7 @@ import pytest
 
 # Import from parent (add project root to path)
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.validate_mdc import extract_frontmatter, validate_mdc
@@ -77,7 +78,7 @@ def test_validate_mdc_globs_only(tmp_path):
     """Globs without alwaysApply is valid."""
     (tmp_path / "rules").mkdir()
     mdc = tmp_path / "rules" / "test.mdc"
-    mdc.write_text("---\ndescription: Python rule\nglobs: \"**/*.py\"\n---\n\n# Content")
+    mdc.write_text('---\ndescription: Python rule\nglobs: "**/*.py"\n---\n\n# Content')
     errs = validate_mdc(mdc)
     assert errs == []
 
@@ -95,7 +96,9 @@ def test_validate_mdc_globs_as_array(tmp_path):
     """Globs as YAML array is valid (Cursor supports both string and list)."""
     (tmp_path / "rules").mkdir()
     mdc = tmp_path / "rules" / "test.mdc"
-    mdc.write_text("---\ndescription: TS rule\nglobs:\n  - \"**/*.ts\"\n  - \"**/*.tsx\"\n---\n\n# Content")
+    mdc.write_text(
+        '---\ndescription: TS rule\nglobs:\n  - "**/*.ts"\n  - "**/*.tsx"\n---\n\n# Content'
+    )
     errs = validate_mdc(mdc)
     assert errs == []
 
@@ -118,6 +121,7 @@ def test_main_validates_custom_rules_dir(tmp_path):
     )
     from scripts.validate_mdc import main
     import sys
+
     orig_argv = sys.argv[:]
     try:
         sys.argv = ["validate_mdc.py", "--rules-dir", str(rules_dir)]
