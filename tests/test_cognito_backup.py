@@ -142,18 +142,111 @@ def test_lambda_handler_exports_and_validates_backup():
     _assert_backup_success(result, mock_s3, mock_cloudwatch)
 
 
-def test_lambda_handler_raises_when_env_missing():
-    """Raises ValueError when AWS_COGNITO_USER_POOL_ID or AWS_S3_BACKUP_BUCKET unset."""
+def test_lambda_handler_raises_when_bucket_missing():
+    """Raises ValueError when AWS_S3_BACKUP_BUCKET is unset (bucket is required)."""
     with (
         patch.dict(
             "os.environ",
-            {"AWS_REGION": "us-west-1", "AWS_COGNITO_USER_POOL_ID": "", "AWS_S3_BACKUP_BUCKET": ""},
+            {"AWS_REGION": "us-west-1", "AWS_S3_BACKUP_BUCKET": ""},
             clear=False,
         ),
     ):
         app = _load_cognito_backup_app()
-        with pytest.raises(ValueError, match="AWS_COGNITO_USER_POOL_ID and AWS_S3_BACKUP_BUCKET"):
+        with pytest.raises(ValueError, match="AWS_S3_BACKUP_BUCKET must be set"):
             app.lambda_handler({}, MagicMock())
+
+
+def test_lambda_handler_all_pools_mode_backs_up_each_pool():
+    """When AWS_COGNITO_USER_POOL_ID is unset, list_user_pools is used and each pool is backed up; manifest has pools key."""
+    mock_cognito = MagicMock()
+    mock_cognito.list_user_pools.return_value = {
+        "UserPools": [
+            {"Id": "us-west-1_aaa", "Name": "PoolA"},
+            {"Id": "us-west-1_bbb", "Name": "PoolB"},
+        ],
+        "NextToken": None,
+    }
+    mock_cognito.list_users.side_effect = [
+        {"Users": [], "PaginationToken": None},
+        {"Users": [], "PaginationToken": None},
+    ]
+    mock_cognito.list_groups.side_effect = [
+        {"Groups": []},
+        {"Groups": []},
+    ]
+    mock_cognito.describe_user_pool.side_effect = [
+        {
+            "UserPool": {
+                "Name": "PoolA",
+                "CreationDate": datetime(2024, 1, 1, tzinfo=UTC),
+                "LastModifiedDate": datetime(2024, 1, 2, tzinfo=UTC),
+                "MfaConfiguration": "OFF",
+                "AccountRecoverySetting": None,
+            }
+        },
+        {
+            "UserPool": {
+                "Name": "PoolB",
+                "CreationDate": datetime(2024, 1, 1, tzinfo=UTC),
+                "LastModifiedDate": datetime(2024, 1, 2, tzinfo=UTC),
+                "MfaConfiguration": "OFF",
+                "AccountRecoverySetting": None,
+            }
+        },
+    ]
+
+    mock_s3, s3_storage = _make_mock_s3_with_storage()
+    mock_cloudwatch = MagicMock()
+
+    with patch.dict(
+        "os.environ",
+        {
+            "AWS_REGION": "us-west-1",
+            "AWS_COGNITO_USER_POOL_ID": "",
+            "AWS_S3_BACKUP_BUCKET": "my-backup-bucket",
+        },
+    ):
+        app = _load_cognito_backup_app()
+        with patch.object(
+            app,
+            "_get_clients",
+            return_value={
+                "cognito": mock_cognito,
+                "s3": mock_s3,
+                "sns": MagicMock(),
+                "cloudwatch": mock_cloudwatch,
+            },
+        ):
+            result = app.lambda_handler({}, MagicMock())
+
+    assert result["status"] == "success"
+    assert "pools" in result
+    assert set(result["pools"]) == {"us-west-1_aaa", "us-west-1_bbb"}
+    assert len(result["backup_keys"]) == 2
+
+    put_calls = mock_s3.put_object.call_args_list
+    backup_keys = [c.kwargs["Key"] for c in put_calls if c.kwargs["Key"].endswith(".json.gz")]
+    assert len(backup_keys) == 2
+    assert "us-west-1_aaa" in backup_keys[0] and "us-west-1_bbb" in backup_keys[1]
+
+    manifest_call = next(c for c in put_calls if c.kwargs["Key"] == "backups/latest/manifest.json")
+    manifest_body = json.loads(manifest_call.kwargs["Body"].decode("utf-8"))
+    assert "run_timestamp" in manifest_body
+    assert "pools" in manifest_body
+    assert set(manifest_body["pools"]) == {"us-west-1_aaa", "us-west-1_bbb"}
+    assert manifest_body["pools"]["us-west-1_aaa"]["total_users"] == 0
+    assert manifest_body["pools"]["us-west-1_bbb"]["total_users"] == 0
+    assert manifest_body["pools"]["us-west-1_aaa"]["backup_key"] == backup_keys[0]
+    assert manifest_body["pools"]["us-west-1_bbb"]["backup_key"] == backup_keys[1]
+
+    get_calls = mock_s3.get_object.call_args_list
+    validation_keys = [c.kwargs["Key"] for c in get_calls]
+    assert backup_keys[0] in validation_keys and backup_keys[1] in validation_keys
+
+    call_kw = mock_cloudwatch.put_metric_data.call_args.kwargs
+    assert call_kw["Namespace"] == "CognitoBackup"
+    assert "TotalUsers" in [m["MetricName"] for m in call_kw["MetricData"]]
+    assert "ExecutionDuration" in [m["MetricName"] for m in call_kw["MetricData"]]
 
 
 def test_validation_failure_raises_and_sns_called_when_configured():

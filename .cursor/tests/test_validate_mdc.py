@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 # Import from parent (add project root to path)
 import sys

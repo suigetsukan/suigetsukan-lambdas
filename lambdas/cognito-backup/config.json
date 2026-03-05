@@ -11,7 +11,7 @@
     "AWS_S3_BACKUP_BUCKET": "placeholder",
     "SNS_SUPPORT_TOPIC_ARN": "optional"
   },
-  "optional_env_vars": ["SNS_SUPPORT_TOPIC_ARN"],
+  "optional_env_vars": ["SNS_SUPPORT_TOPIC_ARN", "AWS_COGNITO_USER_POOL_ID"],
   "layers": [],
   "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
   "role_name": "suigetsukan-cognito-backup-role",

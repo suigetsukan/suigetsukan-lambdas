@@ -1,18 +1,19 @@
 """
 Cognito User Pool Backup Lambda Function
 
-Performs a backup of an Amazon Cognito User Pool's users, groups, and metadata.
+Performs a backup of Amazon Cognito User Pool(s) users, groups, and metadata.
+- When AWS_COGNITO_USER_POOL_ID is set: backs up that single pool (same key/manifest shape as before).
+- When AWS_COGNITO_USER_POOL_ID is unset: lists all user pools in the account/region and backs up each.
+
 Exports user data including attributes (with PII), status, groups, and MFA options (limited),
-along with pool-level metadata.
-The backup is structured as JSON, compressed with gzip, and uploaded to S3 in a date-partitioned
-key format (backups/YYYY/MM/DD/cognito-users-YYYY-MM-DD_HH-MM-SS.json.gz).
-After upload, the backup is validated (re-download, decompress, parse, structure and count checks);
-only then is the manifest updated and success returned.
+along with pool-level metadata. Backup is JSON, gzip, uploaded to S3 in date-partitioned keys.
+After upload, each backup is validated (re-download, decompress, parse, structure and count checks);
+then the manifest is updated and success returned.
 Retention is via S3 lifecycle rules only (e.g. expire prefix backups/ after 365 days).
 
 Environment Variables:
 - AWS_REGION (optional): Region for Cognito/S3/SNS/CloudWatch (default us-west-1).
-- AWS_COGNITO_USER_POOL_ID (required): The Cognito User Pool ID.
+- AWS_COGNITO_USER_POOL_ID (optional): Single pool ID to backup; when unset, all pools in region are backed up.
 - AWS_S3_BACKUP_BUCKET (required): The S3 bucket name for storing backups.
 - SNS_SUPPORT_TOPIC_ARN (optional): ARN of the SNS topic for error notifications.
 """
@@ -27,6 +28,7 @@ import time
 from datetime import datetime, UTC
 
 import boto3
+from botocore.exceptions import ClientError
 
 _REGION = os.environ.get("AWS_REGION", "us-west-1")
 PREFIX = "backups/"
@@ -125,14 +127,109 @@ def _get_user_groups(cognito_client, user_pool_id, username):
     return groups
 
 
+def _list_all_user_pool_ids(cognito_client):
+    """Return all user pool IDs in the account/region (paginated)."""
+    pool_ids = []
+    next_token = None
+    while True:
+        kwargs = {"MaxResults": 60}
+        if next_token:
+            kwargs["NextToken"] = next_token
+        response = cognito_client.list_user_pools(**kwargs)
+        for pool in response.get("UserPools", []):
+            pool_ids.append(pool["Id"])
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+    return pool_ids
+
+
+def _backup_one_pool(cognito, s3, bucket_name, user_pool_id, date_path, timestamp, key_suffix):
+    """
+    Backup a single user pool: fetch users/groups/metadata, gzip, upload, validate.
+    key_suffix is used in the object key, e.g. timestamp only (single-pool) or pool_id-timestamp (all-pools).
+    Returns dict with backup_key and total_users.
+    """
+    key = f"{date_path}/cognito-users-{key_suffix}.json.gz"
+
+    all_users = _get_all_users(cognito, user_pool_id)
+    users_data = []
+    for user in all_users:
+        username = user["Username"]
+        groups = _get_user_groups(cognito, user_pool_id, username)
+        user_record = {
+            "Username": username,
+            "Attributes": {a["Name"]: a["Value"] for a in user.get("Attributes", [])},
+            "Status": user.get("UserStatus"),
+            "Enabled": user.get("Enabled"),
+            "UserCreateDate": (
+                user["UserCreateDate"].isoformat() if user.get("UserCreateDate") else None
+            ),
+            "UserLastModifiedDate": (
+                user["UserLastModifiedDate"].isoformat()
+                if user.get("UserLastModifiedDate")
+                else None
+            ),
+            "Groups": groups,
+            "Mfa": user.get("MFAOptions", []),
+        }
+        users_data.append(user_record)
+
+    users_data.sort(key=lambda x: x["Username"])
+
+    groups_response = cognito.list_groups(UserPoolId=user_pool_id, Limit=50)
+    all_groups = [g["GroupName"] for g in groups_response.get("Groups", [])]
+
+    pool_info = cognito.describe_user_pool(UserPoolId=user_pool_id)["UserPool"]
+    pool_metadata = {
+        "Name": pool_info.get("Name"),
+        "CreationDate": (
+            pool_info["CreationDate"].isoformat() if "CreationDate" in pool_info else None
+        ),
+        "LastModifiedDate": (
+            pool_info["LastModifiedDate"].isoformat() if "LastModifiedDate" in pool_info else None
+        ),
+        "MfaConfiguration": pool_info.get("MfaConfiguration"),
+        "AccountRecoverySetting": pool_info.get("AccountRecoverySetting"),
+    }
+
+    backup_content = {
+        "timestamp": timestamp,
+        "COGNITO_USER_POOL_ID": user_pool_id,
+        "total_users": len(users_data),
+        "users": users_data,
+        "groups": all_groups,
+        "pool_metadata": pool_metadata,
+    }
+
+    compressed_buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=compressed_buffer, mode="wb") as gz:
+        gz.write(json.dumps(backup_content, indent=2, default=str).encode("utf-8"))
+    compressed_buffer.seek(0)
+    backup_bytes = compressed_buffer.getvalue()
+
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=key,
+        Body=backup_bytes,
+        ContentType="application/gzip",
+        ContentEncoding="gzip",
+        ContentMD5=_content_md5(backup_bytes),
+    )
+    _verify_s3_object_exists(s3, bucket_name, key)
+    validate_backup_in_s3(s3, bucket_name, key)
+
+    return {"backup_key": key, "total_users": len(users_data)}
+
+
 def lambda_handler(event, context):
     start_time = time.time()
-    user_pool_id = os.environ.get("AWS_COGNITO_USER_POOL_ID")
-    bucket_name = os.environ.get("AWS_S3_BACKUP_BUCKET")
+    user_pool_id = (os.environ.get("AWS_COGNITO_USER_POOL_ID") or "").strip()
+    bucket_name = (os.environ.get("AWS_S3_BACKUP_BUCKET") or "").strip()
     sns_topic_arn = os.environ.get("SNS_SUPPORT_TOPIC_ARN")
 
-    if not user_pool_id or not bucket_name:
-        raise ValueError("AWS_COGNITO_USER_POOL_ID and AWS_S3_BACKUP_BUCKET must be set")
+    if not bucket_name:
+        raise ValueError("AWS_S3_BACKUP_BUCKET must be set")
 
     clients = _get_clients()
     cognito = clients["cognito"]
@@ -140,96 +237,100 @@ def lambda_handler(event, context):
     sns_client = clients["sns"]
     cloudwatch = clients["cloudwatch"]
 
+    now = datetime.now(UTC)
+    year = now.strftime("%Y")
+    month = now.strftime("%m")
+    day = now.strftime("%d")
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+    date_path = f"{PREFIX}{year}/{month}/{day}"
+
+    manifest_key = f"{PREFIX}latest/manifest.json"
+
     try:
         print("Lambda execution started.")
         print(f"Bucket name: {bucket_name}")
-        now = datetime.now(UTC)
-        year = now.strftime("%Y")
-        month = now.strftime("%m")
-        day = now.strftime("%d")
-        timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-        key = f"{PREFIX}{year}/{month}/{day}/cognito-users-{timestamp}.json.gz"
-        print(f"Generated backup key: {key}")
 
-        all_users = _get_all_users(cognito, user_pool_id)
-        users_data = []
-        for user in all_users:
-            username = user["Username"]
-            groups = _get_user_groups(cognito, user_pool_id, username)
-            user_record = {
-                "Username": username,
-                "Attributes": {a["Name"]: a["Value"] for a in user.get("Attributes", [])},
-                "Status": user.get("UserStatus"),
-                "Enabled": user.get("Enabled"),
-                "UserCreateDate": (
-                    user["UserCreateDate"].isoformat() if user.get("UserCreateDate") else None
-                ),
-                "UserLastModifiedDate": (
-                    user["UserLastModifiedDate"].isoformat()
-                    if user.get("UserLastModifiedDate")
-                    else None
-                ),
-                "Groups": groups,
-                "Mfa": user.get("MFAOptions", []),
+        if user_pool_id:
+            # Single-pool mode: one backup, current manifest shape
+            print(f"Single-pool mode: {user_pool_id}")
+            result = _backup_one_pool(
+                cognito, s3, bucket_name, user_pool_id, date_path, timestamp, timestamp
+            )
+            key = result["backup_key"]
+            total_users = result["total_users"]
+            print(f"Compressed backup saved and verified at s3://{bucket_name}/{key}")
+            print("Backup validation passed.")
+
+            manifest = {
+                "latest_timestamp": timestamp,
+                "total_users": total_users,
+                "backup_key": key,
             }
-            users_data.append(user_record)
+            manifest_body = json.dumps(manifest, indent=2).encode("utf-8")
+            s3.put_object(
+                Bucket=bucket_name,
+                Key=manifest_key,
+                Body=manifest_body,
+                ContentMD5=_content_md5(manifest_body),
+            )
+            _verify_s3_object_exists(s3, bucket_name, manifest_key)
+            print(f"Manifest updated and verified at s3://{bucket_name}/{manifest_key}")
 
-        users_data.sort(key=lambda x: x["Username"])
+            execution_duration = time.time() - start_time
+            cloudwatch.put_metric_data(
+                Namespace="CognitoBackup",
+                MetricData=[
+                    {"MetricName": "TotalUsers", "Value": total_users, "Unit": "Count"},
+                    {
+                        "MetricName": "ExecutionDuration",
+                        "Value": execution_duration,
+                        "Unit": "Seconds",
+                    },
+                ],
+            )
+            print("Metrics published.")
+            print("Lambda execution completed successfully.")
+            return {"status": "success", "backup_key": key}
 
-        groups_response = cognito.list_groups(UserPoolId=user_pool_id, Limit=50)
-        all_groups = [g["GroupName"] for g in groups_response.get("Groups", [])]
+        # All-pools mode: list pools, backup each, write multi-pool manifest
+        pool_ids = _list_all_user_pool_ids(cognito)
+        print(f"All-pools mode: found {len(pool_ids)} pool(s) in region.")
 
-        pool_info = cognito.describe_user_pool(UserPoolId=user_pool_id)["UserPool"]
-        pool_metadata = {
-            "Name": pool_info.get("Name"),
-            "CreationDate": (
-                pool_info["CreationDate"].isoformat() if "CreationDate" in pool_info else None
-            ),
-            "LastModifiedDate": (
-                pool_info["LastModifiedDate"].isoformat()
-                if "LastModifiedDate" in pool_info
-                else None
-            ),
-            "MfaConfiguration": pool_info.get("MfaConfiguration"),
-            "AccountRecoverySetting": pool_info.get("AccountRecoverySetting"),
-        }
+        pools_manifest = {}
+        errors = []
+        total_users_sum = 0
 
-        backup_content = {
-            "timestamp": timestamp,
-            "COGNITO_USER_POOL_ID": user_pool_id,
-            "total_users": len(users_data),
-            "users": users_data,
-            "groups": all_groups,
-            "pool_metadata": pool_metadata,
-        }
+        for pid in pool_ids:
+            try:
+                print(f"Backing up pool: {pid}")
+                result = _backup_one_pool(
+                    cognito, s3, bucket_name, pid, date_path, timestamp, f"{pid}-{timestamp}"
+                )
+                pools_manifest[pid] = {
+                    "backup_key": result["backup_key"],
+                    "total_users": result["total_users"],
+                }
+                total_users_sum += result["total_users"]
+                print(f"  Backup saved at s3://{bucket_name}/{result['backup_key']}")
+            except (ValueError, RuntimeError, OSError, ClientError) as e:
+                err_msg = f"{pid}: {str(e)}"
+                print(f"  Failed: {err_msg}")
+                errors.append(err_msg)
 
-        compressed_buffer = io.BytesIO()
-        with gzip.GzipFile(fileobj=compressed_buffer, mode="wb") as gz:
-            gz.write(json.dumps(backup_content, indent=2, default=str).encode("utf-8"))
-        compressed_buffer.seek(0)
-        backup_bytes = compressed_buffer.getvalue()
+        if errors:
+            error_msg = "Cognito Backup failed for one or more pools:\n" + "\n".join(errors)
+            print(error_msg)
+            if sns_topic_arn:
+                sns_client.publish(
+                    TopicArn=sns_topic_arn,
+                    Subject="Cognito Backup Failure",
+                    Message=error_msg,
+                )
+            raise RuntimeError(error_msg)
 
-        print("Uploading backup to S3...")
-        s3.put_object(
-            Bucket=bucket_name,
-            Key=key,
-            Body=backup_bytes,
-            ContentType="application/gzip",
-            ContentEncoding="gzip",
-            ContentMD5=_content_md5(backup_bytes),
-        )
-        _verify_s3_object_exists(s3, bucket_name, key)
-        print(f"Compressed backup saved and verified at s3://{bucket_name}/{key}")
-
-        print("Validating backup in S3…")
-        validate_backup_in_s3(s3, bucket_name, key)
-        print("Backup validation passed.")
-
-        manifest_key = f"{PREFIX}latest/manifest.json"
         manifest = {
-            "latest_timestamp": timestamp,
-            "total_users": len(users_data),
-            "backup_key": key,
+            "run_timestamp": timestamp,
+            "pools": pools_manifest,
         }
         manifest_body = json.dumps(manifest, indent=2).encode("utf-8")
         s3.put_object(
@@ -245,17 +346,23 @@ def lambda_handler(event, context):
         cloudwatch.put_metric_data(
             Namespace="CognitoBackup",
             MetricData=[
-                {"MetricName": "TotalUsers", "Value": len(users_data), "Unit": "Count"},
+                {"MetricName": "TotalUsers", "Value": total_users_sum, "Unit": "Count"},
                 {"MetricName": "ExecutionDuration", "Value": execution_duration, "Unit": "Seconds"},
             ],
         )
         print("Metrics published.")
-
         print("Lambda execution completed successfully.")
-        return {"status": "success", "backup_key": key}
+        return {
+            "status": "success",
+            "pools": list(pools_manifest.keys()),
+            "backup_keys": [p["backup_key"] for p in pools_manifest.values()],
+        }
 
     except Exception as e:
-        error_msg = f"Cognito Backup failed for User Pool {user_pool_id}: {str(e)}"
+        if user_pool_id:
+            error_msg = f"Cognito Backup failed for User Pool {user_pool_id}: {str(e)}"
+        else:
+            error_msg = str(e)
         print(error_msg)
         if sns_topic_arn:
             sns_client.publish(
