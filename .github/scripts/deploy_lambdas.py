@@ -84,6 +84,9 @@ def build_env_vars(config: dict, lambda_name: str) -> dict:
     env_vars = {}
     config_env = config.get("env_vars", {})
     optional_keys = {k.upper().replace("-", "_") for k in config.get("optional_env_vars", [])}
+    # cognito-backup never uses a single pool ID; treat as optional so deploy never requires it
+    if lambda_name == "cognito-backup":
+        optional_keys.add("AWS_COGNITO_USER_POOL_ID")
     if not config_env:
         print("  no env_vars – skipping environment variables")
         return {}
