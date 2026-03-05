@@ -1,0 +1,78 @@
+# AWS Backup for DynamoDB (Suigetsukan)
+# Deploy once per account/region. DynamoDB backups run weekly; retention 1 year.
+# Cognito is not supported by AWS Backup; use the cognito-backup Lambda.
+#
+# Deploy: aws cloudformation deploy --template-file infra/aws-backup-dynamodb.yaml \
+#          --stack-name suigetsukan-ddb-backup --capabilities CAPABILITY_NAMED_IAM \
+#          --region us-west-1 --profile tennis@suigetsukan
+#
+# Backs up ALL DynamoDB tables in the account/region (wildcard table/*). New tables are included automatically.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS Backup plan for all Suigetsukan DynamoDB tables in this region (1-year retention)."
+
+Parameters:
+  BackupVaultName:
+    Type: String
+    Default: suigetsukan-dynamodb-vault
+    Description: Name of the backup vault.
+
+Resources:
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Ref BackupVaultName
+
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    DependsOn: BackupVault
+    Properties:
+      BackupPlan:
+        BackupPlanName: Suigetsukan-DynamoDB-Weekly
+        BackupPlanRule:
+          - RuleName: WeeklyDynamoDB
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: "cron(0 5 ? * 1 *)"
+            ScheduleExpressionTimezone: UTC
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 1440
+            Lifecycle:
+              DeleteAfterDays: 365
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: suigetsukan-aws-backup-dynamodb-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    DependsOn: BackupPlan
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: Suigetsukan-DynamoDB-Tables
+        IamRoleArn: !GetAtt BackupRole.Arn
+        Resources:
+          # Wildcard: all DynamoDB tables in this account/region (new tables included automatically)
+          - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+
+Outputs:
+  BackupPlanId:
+    Description: AWS Backup plan ID
+    Value: !Ref BackupPlan
+    Export:
+      Name: !Sub "${AWS::StackName}-BackupPlanId"
+  BackupVaultName:
+    Description: Backup vault name
+    Value: !Ref BackupVault
+    Export:
+      Name: !Sub "${AWS::StackName}-BackupVaultName"

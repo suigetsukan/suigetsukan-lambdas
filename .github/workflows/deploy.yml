@@ -16,12 +16,22 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Set base ref for change detection
+        id: base_ref
+        run: |
+          if [ -z "${{ github.event.before }}" ] || [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            echo "base=$(git rev-parse HEAD^ 2>/dev/null || echo HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "base=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Filter changed paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
           list-files: shell
-          base: ${{ github.ref_name }}
+          # On push to main, ref_name is already the new commit; use previous commit so the diff is non-empty.
+          base: ${{ steps.base_ref.outputs.base }}
           filters: |
             lambdas:
               - 'lambdas/**'
