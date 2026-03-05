@@ -5,13 +5,16 @@ Tests for file-name-decipher utils module.
 import pytest
 
 from utils import (
+    convert_to_camel_case,
     find_one_datapoint_item_offset,
     find_three_datapoints_item_offset,
     find_two_datapoints_item_offset,
     get_file_stub,
     get_hls_url_stub_letter,
+    get_stub,
     handle_variations,
     remove_char,
+    sort_url_by_stub,
 )
 
 
@@ -97,3 +100,46 @@ class TestHelpers:
         result = handle_variations(current, new_url)
         assert len(result) == 2
         assert new_url in result
+
+    def test_get_stub_from_path_only(self):
+        assert get_stub("/local/path/c01a.m3u8") == "c01a"
+        assert get_stub("filename.json") == "filename"
+
+    def test_get_stub_empty_path_raises(self):
+        with pytest.raises(ValueError, match="no file stub"):
+            get_stub("https://cdn.example.com/")
+
+    def test_get_stub_url_with_query_string(self):
+        assert get_stub("https://bucket.s3.amazonaws.com/path/a0101x.m3u8?version=1") == "a0101x"
+
+    def test_convert_to_camel_case(self):
+        assert convert_to_camel_case("foo_bar_baz") == "FooBarBaz"
+        assert convert_to_camel_case("single") == "Single"
+
+    def test_convert_to_camel_case_empty_string(self):
+        # Implementation: "".split("_") -> [""]; capitalize yields "" so "x or '_'" gives "_"
+        assert convert_to_camel_case("") == "_"
+
+    def test_convert_to_camel_case_with_underscores(self):
+        assert convert_to_camel_case("_leading") == "_Leading"
+
+    def test_sort_url_by_stub_orders_by_stub(self):
+        urls = [
+            "https://cdn.example.com/z_last.m3u8",
+            "https://cdn.example.com/a_first.m3u8",
+            "https://cdn.example.com/m_middle.m3u8",
+        ]
+        result = sort_url_by_stub(urls)
+        assert result[0].endswith("a_first.m3u8")
+        assert result[1].endswith("m_middle.m3u8")
+        assert result[2].endswith("z_last.m3u8")
+
+    def test_sort_url_by_stub_mutates_in_place(self):
+        urls = [
+            "https://cdn.example.com/b.m3u8",
+            "https://cdn.example.com/a.m3u8",
+        ]
+        result = sort_url_by_stub(urls)
+        assert result is urls
+        assert urls[0].endswith("a.m3u8")
+        assert urls[1].endswith("b.m3u8")

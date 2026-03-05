@@ -188,6 +188,8 @@ pytest tests/ -v
 
 ## Testing
 
+To run all tests: `./scripts/run_tests.sh` (or `pytest tests/ -v`).
+
 Tests run on push and pull request via GitHub Actions. **Deploy only proceeds if all lint, type, security, and test checks pass.**
 
 ---
