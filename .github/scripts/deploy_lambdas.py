@@ -172,6 +172,9 @@ def deploy_lambda(lambda_dir: Path):
             shutil.rmtree(common_dest)
 
         env_vars = build_env_vars(config, lambda_dir.name)
+        # cognito-backup always backs up all user pools in the region; never pass a single pool ID
+        if lambda_dir.name == "cognito-backup":
+            env_vars.pop("AWS_COGNITO_USER_POOL_ID", None)
         region = os.getenv("AWS_REGION", "us-west-1")
         lambda_client = boto3.client("lambda", region_name=region)
         function_arn = (

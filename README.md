@@ -88,9 +88,9 @@ See [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md).
 
 **Invocation:** EventBridge schedule (**daily** at 3 AM UTC, `cron(0 3 * * ? *)`). Can also be invoked manually.
 
-**Behavior:** Lists all users (with pagination) and each user’s groups, fetches pool metadata, compresses with gzip, and uploads to `s3://{bucket}/backups/YYYY/MM/DD/cognito-users-{timestamp}.json.gz`. After upload, the backup is **validated** (re-download, decompress, structure and count checks); only then is the manifest at `backups/latest/manifest.json` updated and success returned. Publishes CloudWatch metrics (namespace `CognitoBackup`: TotalUsers, ExecutionDuration). Optional SNS notification on failure. **Retention:** Use **S3 lifecycle** on the backup bucket (prefix `backups/`, expire after 365 days). No pruning script (see [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md)).
+**Behavior:** Lists all user pools in the region, then for each pool lists all users (with pagination) and each user’s groups, fetches pool metadata, compresses with gzip, and uploads to `s3://{bucket}/backups/YYYY/MM/DD/cognito-users-{pool_id}-{timestamp}.json.gz`. After upload, the backup is **validated** (re-download, decompress, structure and count checks); only then is the manifest at `backups/latest/manifest.json` updated and success returned. Publishes CloudWatch metrics (namespace `CognitoBackup`: TotalUsers, ExecutionDuration). Optional SNS notification on failure. **Retention:** Use **S3 lifecycle** on the backup bucket (prefix `backups/`, expire after 365 days). No pruning script (see [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md)).
 
-**Key env:** `AWS_REGION`, `AWS_COGNITO_USER_POOL_ID`, `AWS_S3_BACKUP_BUCKET`, optional `SNS_SUPPORT_TOPIC_ARN`.
+**Key env:** `AWS_REGION`, `AWS_S3_BACKUP_BUCKET` (required); optional `SNS_SUPPORT_TOPIC_ARN`. The deploy script never sets a single pool ID, so cognito-backup **always** backs up **all** Cognito user pools in the account in the configured region.
 
 | Config        | Value                          |
 |---------------|---------------------------------|

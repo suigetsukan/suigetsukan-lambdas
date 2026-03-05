@@ -12,7 +12,7 @@ This document lists sensitive/proprietary information that was redacted from the
 | cognito-post-confirmation | Hardcoded `tennis.suigetsukan@gmail.com` (SES sender) | `AWS_SES_SOURCE_EMAIL` |
 | cognito-post-confirmation | Hardcoded `us-west-1` for Cognito/SES | `AWS_REGION` |
 | file-name-decipher | Hardcoded DynamoDB table names | `AWS_DDB_AIKIDO_TABLE_NAME`, `AWS_DDB_BATTODO_TABLE_NAME`, `AWS_DDB_DANZAN_RYU_TABLE_NAME` |
-| cognito-backup | Cognito User Pool ID, S3 bucket, optional SNS | `AWS_COGNITO_USER_POOL_ID`, `AWS_S3_BACKUP_BUCKET`, `SNS_SUPPORT_TOPIC_ARN` (optional) |
+| cognito-backup | S3 bucket (required); optional SNS; always backs up all pools (no pool ID at deploy) | `AWS_S3_BACKUP_BUCKET`; `SNS_SUPPORT_TOPIC_ARN` (optional) |
 
 ---
 
@@ -27,7 +27,7 @@ Add these to your GitHub repository secrets (Settings → Secrets and variables 
 | `AWS_ACCOUNT_ID` | AWS account ID | Pipeline (deploy job) |
 | `AWS_REGION` | Primary region (e.g. `us-west-1`) | Pipeline (deploy job), billing-rest-api, cognito lambdas |
 | `AWS_SES_SOURCE_EMAIL` | Verified SES sender email | cognito-rest-api, cognito-post-confirmation |
-| `AWS_COGNITO_USER_POOL_ID` | Cognito User Pool ID | cognito-rest-api |
+| `AWS_COGNITO_USER_POOL_ID` | Cognito User Pool ID (cognito-rest-api only). Not used by cognito-backup; deploy script omits it so cognito-backup always backs up all user pools in the region. | cognito-rest-api |
 | `AWS_DDB_AIKIDO_TABLE_NAME` | DynamoDB table for Aikido curriculum | file-name-decipher |
 | `AWS_DDB_BATTODO_TABLE_NAME` | DynamoDB table for Battodo curriculum | file-name-decipher |
 | `AWS_DDB_DANZAN_RYU_TABLE_NAME` | DynamoDB table for Danzan Ryu curriculum | file-name-decipher |
@@ -63,8 +63,8 @@ DynamoDB is backed up by **AWS Backup** in **us-west-1**: **all** tables in the 
 
 ### cognito-backup
 - `AWS_REGION` — Region (e.g. **us-west-1**). Deploy uses profile **tennis@suigetsukan** and region **us-west-1** (or set `AWS_REGION` in CI).
-- `AWS_COGNITO_USER_POOL_ID` — Cognito User Pool to export.
-- `AWS_S3_BACKUP_BUCKET` — S3 bucket for exports. The bucket must exist and be writable by the Lambda. **Retention:** Use **S3 lifecycle rules only** (e.g. lifecycle rule on prefix `backups/`, expire after 365 days). No pruning script. Output: gzip-compressed backups at `backups/YYYY/MM/DD/cognito-users-{timestamp}.json.gz`, manifest at `backups/latest/manifest.json`. After each upload the backup is validated (re-download, decompress, structure check); CloudWatch metrics (namespace `CognitoBackup`: TotalUsers, ExecutionDuration) are published.
+- **All-pools behavior:** The deploy script never sets `AWS_COGNITO_USER_POOL_ID` on the cognito-backup Lambda, so it **always** backs up **all** Cognito user pools in the account in the configured region.
+- `AWS_S3_BACKUP_BUCKET` — S3 bucket for exports. The bucket must exist and be writable by the Lambda. **Retention:** Use **S3 lifecycle rules only** (e.g. lifecycle rule on prefix `backups/`, expire after 365 days). No pruning script. Output: gzip-compressed backups at `backups/YYYY/MM/DD/cognito-users-{pool_id}-{timestamp}.json.gz`; manifest at `backups/latest/manifest.json` (`run_timestamp`, `pools` with per-pool `backup_key` and `total_users`). After each upload the backup is validated (re-download, decompress, structure check); CloudWatch metrics (namespace `CognitoBackup`: TotalUsers, ExecutionDuration) are published.
 - `SNS_SUPPORT_TOPIC_ARN` (optional) — ARN of SNS topic for error notifications on backup failure.
 
 No passwords are exported; restore requires users to reset password or use invite flow.
