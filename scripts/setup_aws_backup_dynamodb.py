@@ -86,9 +86,7 @@ def selection_exists(backup_client, plan_id: str) -> bool:
     return False
 
 
-def create_backup_selection(
-    backup_client, plan_id: str, role_arn: str, account_id: str
-) -> None:
+def create_backup_selection(backup_client, plan_id: str, role_arn: str, account_id: str) -> None:
     # Wildcard: all DynamoDB tables in this account/region (new tables included automatically)
     resources = [f"arn:aws:dynamodb:{REGION}:{account_id}:table/*"]
     selection = {
@@ -96,9 +94,7 @@ def create_backup_selection(
         "IamRoleArn": role_arn,
         "Resources": resources,
     }
-    backup_client.create_backup_selection(
-        BackupPlanId=plan_id, BackupSelection=selection
-    )
+    backup_client.create_backup_selection(BackupPlanId=plan_id, BackupSelection=selection)
 
 
 def main() -> None:
@@ -120,7 +116,9 @@ def main() -> None:
         create_backup_selection(backup, plan_id, role_arn, account_id)
         print(f"Created backup selection: {SELECTION_NAME} (all DynamoDB tables in {REGION})")
 
-    print("Done. Ensure DynamoDB is opted in for AWS Backup in this region (Console: AWS Backup → Settings).")
+    print(
+        "Done. Ensure DynamoDB is opted in for AWS Backup in this region (Console: AWS Backup → Settings)."
+    )
 
 
 if __name__ == "__main__":

@@ -22,10 +22,10 @@ Add these to your GitHub repository secrets (Settings → Secrets and variables 
 
 | Secret Name | Description | Used By |
 |-------------|-------------|---------|
-| `AWS_ACCESS_KEY_ID` | IAM user for deployment | Deploy workflow |
-| `AWS_SECRET_ACCESS_KEY` | IAM user for deployment | Deploy workflow |
-| `AWS_ACCOUNT_ID` | AWS account ID | Deploy workflow |
-| `AWS_REGION` | Primary region (e.g. `us-west-1`) | Deploy workflow, billing-rest-api, cognito lambdas |
+| `AWS_ACCESS_KEY_ID` | IAM user for deployment | Pipeline (deploy job) |
+| `AWS_SECRET_ACCESS_KEY` | IAM user for deployment | Pipeline (deploy job) |
+| `AWS_ACCOUNT_ID` | AWS account ID | Pipeline (deploy job) |
+| `AWS_REGION` | Primary region (e.g. `us-west-1`) | Pipeline (deploy job), billing-rest-api, cognito lambdas |
 | `AWS_SES_SOURCE_EMAIL` | Verified SES sender email | cognito-rest-api, cognito-post-confirmation |
 | `AWS_COGNITO_USER_POOL_ID` | Cognito User Pool ID | cognito-rest-api |
 | `AWS_DDB_AIKIDO_TABLE_NAME` | DynamoDB table for Aikido curriculum | file-name-decipher |

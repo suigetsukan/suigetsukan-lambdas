@@ -12,7 +12,7 @@ CRITICAL_FILES = [
     ".github/scripts/extract_changed_lambdas.py",
     ".github/scripts/set_flags.py",
     ".github/scripts/validate_lambda_configs.py",
-    ".github/workflows/deploy.yml",
+    ".github/workflows/pipeline.yml",
 ]
 
 
