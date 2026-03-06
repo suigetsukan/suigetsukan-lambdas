@@ -9,6 +9,7 @@ import os
 CRITICAL_FILES = [
     ".github/schemas/lambda-config.schema.json",
     ".github/scripts/deploy_lambdas.py",
+    ".github/scripts/deploy_roles.py",
     ".github/scripts/extract_changed_lambdas.py",
     ".github/scripts/set_flags.py",
     ".github/scripts/validate_lambda_configs.py",

@@ -38,10 +38,52 @@ def load_config(lambda_dir: Path) -> dict:
         return json.load(f)
 
 
+POLICY_MAP = {
+    "ce": "arn:aws:iam::aws:policy/AWSCostExplorerReadOnlyAccess",
+    "cloudwatch": "arn:aws:iam::aws:policy/CloudWatchFullAccess",
+    "cognito-idp": "arn:aws:iam::aws:policy/AmazonCognitoPowerUser",
+    "dynamodb": "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+    "iot": "arn:aws:iam::aws:policy/AWSIoTFullAccess",
+    "iot-data": "arn:aws:iam::aws:policy/AWSIoTDataAccess",
+    "s3": "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+    "ses": "arn:aws:iam::aws:policy/AmazonSESFullAccess",
+    "sns": "arn:aws:iam::aws:policy/AmazonSNSFullAccess",
+    "sqs": "arn:aws:iam::aws:policy/AmazonSQSFullAccess",
+}
+
+
+def _discover_services(lambda_dir: Path) -> set[str]:
+    services: set[str] = set()
+    for py_file in lambda_dir.glob("*.py"):
+        code = py_file.read_text()
+        services.update(re.findall(r'boto3\.client\(["\']([^"\']+)["\']\)', code))
+        services.update(re.findall(r'boto3\.resource\(["\']([^"\']+)["\']\)', code))
+    return services
+
+
+def _ensure_policies_attached(role_name: str, services: set[str]) -> None:
+    """Attach any policy_map policies for discovered services not already on the role."""
+    paginator = iam.get_paginator("list_attached_role_policies")
+    attached_arns = set()
+    for page in paginator.paginate(RoleName=role_name):
+        for p in page.get("AttachedPolicies", []):
+            attached_arns.add(p["PolicyArn"])
+    for svc in services:
+        if svc not in POLICY_MAP:
+            continue
+        arn = POLICY_MAP[svc]
+        if arn not in attached_arns:
+            iam.attach_role_policy(RoleName=role_name, PolicyArn=arn)
+            print(f"  Attached policy for {svc}: {arn}")
+            attached_arns.add(arn)
+
+
 def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
+    services = _discover_services(lambda_dir)
     try:
         iam.get_role(RoleName=role_name)
         print(f"  Role {role_name} exists")
+        _ensure_policies_attached(role_name, services)
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchEntity":
             print(f"  Creating role {role_name}")
@@ -63,29 +105,7 @@ def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
             basic_policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
             iam.attach_role_policy(RoleName=role_name, PolicyArn=basic_policy_arn)
             print(f"  Attached {basic_policy_arn}")
-
-            policy_map = {
-                "ce": "arn:aws:iam::aws:policy/AWSCostExplorerReadOnlyAccess",
-                "cloudwatch": "arn:aws:iam::aws:policy/CloudWatchFullAccess",
-                "cognito-idp": "arn:aws:iam::aws:policy/AmazonCognitoPowerUser",
-                "dynamodb": "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
-                "iot": "arn:aws:iam::aws:policy/AWSIoTFullAccess",
-                "iot-data": "arn:aws:iam::aws:policy/AWSIoTDataAccess",
-                "s3": "arn:aws:iam::aws:policy/AmazonS3FullAccess",
-                "ses": "arn:aws:iam::aws:policy/AmazonSESFullAccess",
-                "sns": "arn:aws:iam::aws:policy/AmazonSNSFullAccess",
-                "sqs": "arn:aws:iam::aws:policy/AmazonSQSFullAccess",
-            }
-            services: set[str] = set()
-            for py_file in lambda_dir.glob("*.py"):
-                code = py_file.read_text()
-                services.update(re.findall(r'boto3\.client\(["\']([^"\']+)["\']\)', code))
-                services.update(re.findall(r'boto3\.resource\(["\']([^"\']+)["\']\)', code))
-            for svc in services:
-                if svc in policy_map:
-                    iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_map[svc])
-                    print(f"  Attached policy for {svc}: {policy_map[svc]}")
-
+            _ensure_policies_attached(role_name, services)
             time.sleep(30)
         else:
             raise
