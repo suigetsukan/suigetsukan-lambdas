@@ -262,7 +262,9 @@ def _cognito_mock_for_post_actions():
             ],
         }
     )
-    cognito_mock.admin_add_user_to_group.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+    cognito_mock.admin_add_user_to_group.return_value = {
+        "ResponseMetadata": {"HTTPStatusCode": 200}
+    }
     cognito_mock.admin_remove_user_from_group.return_value = {
         "ResponseMetadata": {"HTTPStatusCode": 200},
     }
@@ -280,11 +282,13 @@ def _cognito_mock_for_post_actions():
 
 
 def _post_body():
-    return json.dumps({
-        "user": "testuser",
-        "user_email": "user@example.com",
-        "admin_email": "admin@example.com",
-    })
+    return json.dumps(
+        {
+            "user": "testuser",
+            "user_email": "user@example.com",
+            "admin_email": "admin@example.com",
+        }
+    )
 
 
 @pytest.mark.parametrize(
@@ -312,7 +316,12 @@ def test_handler_post_actions_return_200(path_suffix, expected_substring):
         mock_boto.return_value = _cognito_mock_for_post_actions()
         app = _load_cognito_rest_app()
         with patch.object(app, "send_mail"):
-            event = {"httpMethod": "POST", "path": path_suffix, "body": _post_body(), **AUTH_CONTEXT}
+            event = {
+                "httpMethod": "POST",
+                "path": path_suffix,
+                "body": _post_body(),
+                **AUTH_CONTEXT,
+            }
             result = app.handler(event, MagicMock())
         assert result["statusCode"] == 200
         body_str = result["body"]
@@ -332,7 +341,10 @@ def test_handler_get_invalid_path_raises():
         patch("boto3.client") as mock_boto,
     ):
         cognito_mock = MagicMock()
-        cognito_mock.list_users.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}, "Users": []}
+        cognito_mock.list_users.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [],
+        }
         cognito_mock.list_users_in_group.return_value = {
             "ResponseMetadata": {"HTTPStatusCode": 200},
             "Users": [],

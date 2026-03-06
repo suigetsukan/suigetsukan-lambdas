@@ -69,9 +69,7 @@ class TestFindPlanByName:
         backup.get_paginator.return_value.paginate.return_value = [
             {"BackupPlansList": [{"BackupPlanId": "plan-abc"}]}
         ]
-        backup.get_backup_plan.return_value = {
-            "BackupPlan": {"BackupPlanName": module.PLAN_NAME}
-        }
+        backup.get_backup_plan.return_value = {"BackupPlan": {"BackupPlanName": module.PLAN_NAME}}
 
         result = module.find_plan_by_name(backup)
 
@@ -83,9 +81,7 @@ class TestFindPlanByName:
         backup.get_paginator.return_value.paginate.return_value = [
             {"BackupPlansList": [{"BackupPlanId": "plan-xyz"}]}
         ]
-        backup.get_backup_plan.return_value = {
-            "BackupPlan": {"BackupPlanName": "Other-Plan"}
-        }
+        backup.get_backup_plan.return_value = {"BackupPlan": {"BackupPlanName": "Other-Plan"}}
 
         result = module.find_plan_by_name(backup)
 
@@ -94,9 +90,7 @@ class TestFindPlanByName:
     def test_returns_none_when_list_empty(self):
         module = _load_module()
         backup = MagicMock()
-        backup.get_paginator.return_value.paginate.return_value = [
-            {"BackupPlansList": []}
-        ]
+        backup.get_paginator.return_value.paginate.return_value = [{"BackupPlansList": []}]
 
         result = module.find_plan_by_name(backup)
 
@@ -144,9 +138,7 @@ class TestSelectionExists:
     def test_returns_false_when_list_empty(self):
         module = _load_module()
         backup = MagicMock()
-        backup.get_paginator.return_value.paginate.return_value = [
-            {"BackupSelectionsList": []}
-        ]
+        backup.get_paginator.return_value.paginate.return_value = [{"BackupSelectionsList": []}]
 
         result = module.selection_exists(backup, "plan-123")
 
