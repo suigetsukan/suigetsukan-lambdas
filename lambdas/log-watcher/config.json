@@ -1,0 +1,29 @@
+{
+  "function_name_suffix": "log-watcher",
+  "function_name": "suigetsukan-log-watcher",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 120,
+  "memory_size": 256,
+  "role_name": "suigetsukan-log-watcher-role",
+  "env_vars": {
+    "SNS_SUPPORT_TOPIC_ARN": "placeholder",
+    "AWS_DDB_DEDUP_TABLE_NAME": "placeholder",
+    "ENV": "placeholder",
+    "KEYWORDS_JSON": "placeholder",
+    "IGNORE_PATTERNS_JSON": "placeholder",
+    "MAX_SMS_LEN": "placeholder",
+    "MAX_MATCH_LINES": "placeholder",
+    "DEDUP_WINDOW_SECONDS": "placeholder",
+    "THROTTLE_MAX_ALERTS": "placeholder",
+    "THROTTLE_WINDOW_SECONDS": "placeholder"
+  },
+  "optional_env_vars": [
+    "AWS_DDB_DEDUP_TABLE_NAME", "ENV", "KEYWORDS_JSON", "IGNORE_PATTERNS_JSON",
+    "MAX_SMS_LEN", "MAX_MATCH_LINES", "DEDUP_WINDOW_SECONDS", "THROTTLE_MAX_ALERTS",
+    "THROTTLE_WINDOW_SECONDS"
+  ],
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"]
+}

@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LogsDescribeAndPutFilter",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:DescribeSubscriptionFilters",
+        "logs:PutSubscriptionFilter"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaAddPermission",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunction",
+        "lambda:AddPermission",
+        "lambda:RemovePermission"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "STSGetCallerIdentity",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    }
+  ]
+}

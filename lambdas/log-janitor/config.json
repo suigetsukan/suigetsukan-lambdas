@@ -1,0 +1,53 @@
+{
+  "function_name_suffix": "log-janitor",
+  "function_name": "suigetsukan-log-janitor",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 300,
+  "memory_size": 256,
+  "optional_env_vars": [
+    "MODE", "REGIONS", "DEFAULT_RETENTION_DAYS", "HIGH_RISK_RETENTION_DAYS", "HIGH_RISK_PATTERNS",
+    "LOG_GROUP_INCLUDE_PREFIXES", "LOG_GROUP_EXCLUDE_PATTERNS", "LOG_GROUP_EXCEPTIONS_JSON",
+    "REQUIRE_CLOUDTRAIL", "REQUIRE_MULTI_REGION_TRAIL", "REQUIRE_LOG_FILE_VALIDATION",
+    "CLOUDTRAIL_S3_BUCKET_NAME", "CLOUDTRAIL_S3_PREFIX", "CLOUDTRAIL_RETENTION_YEARS",
+    "REQUIRE_BUCKET_VERSIONING", "REQUIRE_BUCKET_ENCRYPTION", "REQUIRE_BLOCK_PUBLIC_ACCESS",
+    "REQUIRE_BUCKET_LIFECYCLE", "SNS_TOPIC_ARN", "REPORT_ONLY_ON_DRIFT",
+    "MAX_DRIFT_ITEMS_IN_MESSAGE", "ALLOW_CLOUDTRAIL_CREATE"
+  ],
+  "env_vars": {
+    "MODE": "placeholder",
+    "REGIONS": "placeholder",
+    "DEFAULT_RETENTION_DAYS": "placeholder",
+    "HIGH_RISK_RETENTION_DAYS": "placeholder",
+    "HIGH_RISK_PATTERNS": "placeholder",
+    "LOG_GROUP_INCLUDE_PREFIXES": "placeholder",
+    "LOG_GROUP_EXCLUDE_PATTERNS": "placeholder",
+    "LOG_GROUP_EXCEPTIONS_JSON": "placeholder",
+    "REQUIRE_CLOUDTRAIL": "placeholder",
+    "REQUIRE_MULTI_REGION_TRAIL": "placeholder",
+    "REQUIRE_LOG_FILE_VALIDATION": "placeholder",
+    "CLOUDTRAIL_S3_BUCKET_NAME": "placeholder",
+    "CLOUDTRAIL_S3_PREFIX": "placeholder",
+    "CLOUDTRAIL_RETENTION_YEARS": "placeholder",
+    "REQUIRE_BUCKET_VERSIONING": "placeholder",
+    "REQUIRE_BUCKET_ENCRYPTION": "placeholder",
+    "REQUIRE_BLOCK_PUBLIC_ACCESS": "placeholder",
+    "REQUIRE_BUCKET_LIFECYCLE": "placeholder",
+    "SNS_TOPIC_ARN": "placeholder",
+    "REPORT_ONLY_ON_DRIFT": "placeholder",
+    "MAX_DRIFT_ITEMS_IN_MESSAGE": "placeholder",
+    "ALLOW_CLOUDTRAIL_CREATE": "placeholder"
+  },
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "role_name": "suigetsukan-log-janitor-role",
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"],
+  "event_sources": [
+    {
+      "type": "eventbridge",
+      "arn": "default",
+      "schedule_expression": "cron(0 5 * * ? *)",
+      "rule_name": "suigetsukan-log-janitor-Rule"
+    }
+  ]
+}

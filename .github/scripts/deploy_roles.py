@@ -78,12 +78,29 @@ def _ensure_policies_attached(role_name: str, services: set[str]) -> None:
             attached_arns.add(arn)
 
 
+def _attach_inline_policy_if_present(role_name: str, lambda_dir: Path) -> bool:
+    """If lambda_dir/iam_policy.json exists, attach it as inline policy. Return True if attached."""
+    policy_path = lambda_dir / "iam_policy.json"
+    if not policy_path.exists():
+        return False
+    with open(policy_path) as f:
+        doc = json.load(f)
+    iam.put_role_policy(
+        RoleName=role_name,
+        PolicyName="LambdaInlinePolicy",
+        PolicyDocument=json.dumps(doc),
+    )
+    print(f"  Attached inline policy from {policy_path.name}")
+    return True
+
+
 def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
     services = _discover_services(lambda_dir)
     try:
         iam.get_role(RoleName=role_name)
         print(f"  Role {role_name} exists")
         _ensure_policies_attached(role_name, services)
+        _attach_inline_policy_if_present(role_name, lambda_dir)
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchEntity":
             print(f"  Creating role {role_name}")
@@ -106,6 +123,7 @@ def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
             iam.attach_role_policy(RoleName=role_name, PolicyArn=basic_policy_arn)
             print(f"  Attached {basic_policy_arn}")
             _ensure_policies_attached(role_name, services)
+            _attach_inline_policy_if_present(role_name, lambda_dir)
             time.sleep(30)
         else:
             raise
