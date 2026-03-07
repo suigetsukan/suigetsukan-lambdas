@@ -18,6 +18,7 @@ from botocore.exceptions import ClientError
 def test_enroller_enrolls_matching_log_groups(mock_boto_client, load_lambda):
     """Enroller attaches subscription filter to in-scope log groups."""
     mock_logs = MagicMock()
+
     def _paginate(**_kw):
         yield {
             "logGroups": [
@@ -25,11 +26,14 @@ def test_enroller_enrolls_matching_log_groups(mock_boto_client, load_lambda):
                 {"logGroupName": "/aws/lambda/bar-prod"},
             ]
         }
+
     mock_logs.get_paginator.return_value.paginate.side_effect = _paginate
 
     mock_lambda = MagicMock()
     mock_lambda.get_function.return_value = {
-        "Configuration": {"FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"}
+        "Configuration": {
+            "FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+        }
     }
 
     mock_sts = MagicMock()
@@ -68,6 +72,7 @@ def test_enroller_enrolls_matching_log_groups(mock_boto_client, load_lambda):
 def test_enroller_skips_destination_log_group(mock_boto_client, load_lambda):
     """Enroller skips the log-watcher's own log group (AWS disallows self-subscription)."""
     mock_logs = MagicMock()
+
     def _paginate(**_kw):
         yield {
             "logGroups": [
@@ -75,11 +80,14 @@ def test_enroller_skips_destination_log_group(mock_boto_client, load_lambda):
                 {"logGroupName": "/aws/lambda/other-lambda"},
             ]
         }
+
     mock_logs.get_paginator.return_value.paginate.side_effect = _paginate
 
     mock_lambda = MagicMock()
     mock_lambda.get_function.return_value = {
-        "Configuration": {"FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"}
+        "Configuration": {
+            "FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+        }
     }
 
     mock_sts = MagicMock()
@@ -121,6 +129,7 @@ def test_enroller_skips_destination_log_group(mock_boto_client, load_lambda):
 def test_enroller_skips_own_log_group(mock_boto_client, load_lambda):
     """Enroller skips its own log group so its logs are not sent to log-watcher."""
     mock_logs = MagicMock()
+
     def _paginate(**_kw):
         yield {
             "logGroups": [
@@ -128,11 +137,14 @@ def test_enroller_skips_own_log_group(mock_boto_client, load_lambda):
                 {"logGroupName": "/aws/lambda/other-lambda"},
             ]
         }
+
     mock_logs.get_paginator.return_value.paginate.side_effect = _paginate
 
     mock_lambda = MagicMock()
     mock_lambda.get_function.return_value = {
-        "Configuration": {"FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"}
+        "Configuration": {
+            "FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+        }
     }
 
     mock_sts = MagicMock()
@@ -173,13 +185,17 @@ def test_enroller_skips_own_log_group(mock_boto_client, load_lambda):
 def test_enroller_skips_excluded_log_groups(mock_boto_client, load_lambda):
     """Enroller skips log groups matching exclude pattern."""
     mock_logs = MagicMock()
+
     def _paginate(**_kw):
         yield {"logGroups": [{"logGroupName": "/aws/lambda/foo-test"}]}
+
     mock_logs.get_paginator.return_value.paginate.side_effect = _paginate
 
     mock_lambda = MagicMock()
     mock_lambda.get_function.return_value = {
-        "Configuration": {"FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"}
+        "Configuration": {
+            "FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+        }
     }
 
     mock_sts = MagicMock()
@@ -224,7 +240,9 @@ def test_enroller_treats_conflict_as_success(mock_boto_client, load_lambda):
 
     mock_lambda = MagicMock()
     mock_lambda.get_function.return_value = {
-        "Configuration": {"FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"}
+        "Configuration": {
+            "FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+        }
     }
     mock_lambda.add_permission.side_effect = ClientError(
         {"Error": {"Code": "ResourceConflictException"}},
@@ -254,7 +272,9 @@ def test_enroller_treats_conflict_as_success(mock_boto_client, load_lambda):
     assert mock_lambda.add_permission.call_count == 1
     call_kw = mock_logs.put_subscription_filter.call_args.kwargs
     assert call_kw["logGroupName"] == "/aws/lambda/suigetsukan-billing-rest-api"
-    assert call_kw["destinationArn"] == "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+    assert (
+        call_kw["destinationArn"] == "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+    )
     assert call_kw["filterName"] == "log-watcher-alert"
 
 
@@ -276,9 +296,7 @@ def test_enroller_skips_already_enrolled_log_group(mock_boto_client, load_lambda
         {"logGroups": [{"logGroupName": "/aws/lambda/already-enrolled"}]}
     ]
     mock_logs.describe_subscription_filters.return_value = {
-        "subscriptionFilters": [
-            {"filterName": "log-watcher-alert", "destinationArn": fn_arn}
-        ]
+        "subscriptionFilters": [{"filterName": "log-watcher-alert", "destinationArn": fn_arn}]
     }
 
     mock_lambda = MagicMock()
@@ -337,7 +355,9 @@ def test_enroller_retries_put_filter_on_permission_exception(mock_boto_client, l
 
     mock_lambda = MagicMock()
     mock_lambda.get_function.return_value = {
-        "Configuration": {"FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"}
+        "Configuration": {
+            "FunctionArn": "arn:aws:lambda:us-east-2:123:function:suigetsukan-log-watcher"
+        }
     }
 
     mock_sts = MagicMock()

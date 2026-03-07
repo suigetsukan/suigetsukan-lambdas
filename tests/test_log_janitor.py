@@ -36,18 +36,29 @@ def _make_paginator(pages):
 def test_audit_mode_reports_drift_no_put_retention(mock_boto_client, load_lambda):
     """AUDIT mode: drift reported, PutRetentionPolicy not called."""
     mock_logs = MagicMock()
-    mock_logs.get_paginator.return_value = _make_paginator([
-        {
-            "logGroups": [
-                {
-                    "logGroupName": "/aws/lambda/foo",
-                    "retentionInDays": None,
-                }
-            ]
-        }
-    ])
+    mock_logs.get_paginator.return_value = _make_paginator(
+        [
+            {
+                "logGroups": [
+                    {
+                        "logGroupName": "/aws/lambda/foo",
+                        "retentionInDays": None,
+                    }
+                ]
+            }
+        ]
+    )
     mock_ct = MagicMock()
-    mock_ct.describe_trails.return_value = {"trailList": [{"Name": "t1", "IsMultiRegionTrail": True, "S3BucketName": "b1", "LogFileValidationEnabled": True}]}
+    mock_ct.describe_trails.return_value = {
+        "trailList": [
+            {
+                "Name": "t1",
+                "IsMultiRegionTrail": True,
+                "S3BucketName": "b1",
+                "LogFileValidationEnabled": True,
+            }
+        ]
+    }
     mock_ct.get_trail_status.return_value = {"IsLogging": True}
     mock_s3 = MagicMock()
     mock_s3.get_public_access_block.return_value = {
@@ -106,18 +117,29 @@ def test_audit_mode_reports_drift_no_put_retention(mock_boto_client, load_lambda
 def test_apply_mode_calls_put_retention(mock_boto_client, load_lambda):
     """APPLY mode: PutRetentionPolicy called and fixed count incremented."""
     mock_logs = MagicMock()
-    mock_logs.get_paginator.return_value = _make_paginator([
-        {
-            "logGroups": [
-                {
-                    "logGroupName": "/aws/lambda/bar",
-                    "retentionInDays": None,
-                }
-            ]
-        }
-    ])
+    mock_logs.get_paginator.return_value = _make_paginator(
+        [
+            {
+                "logGroups": [
+                    {
+                        "logGroupName": "/aws/lambda/bar",
+                        "retentionInDays": None,
+                    }
+                ]
+            }
+        ]
+    )
     mock_ct = MagicMock()
-    mock_ct.describe_trails.return_value = {"trailList": [{"Name": "t1", "IsMultiRegionTrail": True, "S3BucketName": "b1", "LogFileValidationEnabled": True}]}
+    mock_ct.describe_trails.return_value = {
+        "trailList": [
+            {
+                "Name": "t1",
+                "IsMultiRegionTrail": True,
+                "S3BucketName": "b1",
+                "LogFileValidationEnabled": True,
+            }
+        ]
+    }
     mock_ct.get_trail_status.return_value = {"IsLogging": True}
     mock_s3 = MagicMock()
     mock_s3.get_public_access_block.return_value = {
@@ -211,11 +233,20 @@ def test_cloudtrail_no_trail_finding(mock_boto_client, load_lambda):
 def test_sns_publish_when_drift(mock_boto_client, load_lambda):
     """When SNS_TOPIC_ARN set and drift present, Publish is called."""
     mock_logs = MagicMock()
-    mock_logs.get_paginator.return_value = _make_paginator([
-        {"logGroups": [{"logGroupName": "/aws/lambda/x", "retentionInDays": None}]}
-    ])
+    mock_logs.get_paginator.return_value = _make_paginator(
+        [{"logGroups": [{"logGroupName": "/aws/lambda/x", "retentionInDays": None}]}]
+    )
     mock_ct = MagicMock()
-    mock_ct.describe_trails.return_value = {"trailList": [{"Name": "t1", "IsMultiRegionTrail": True, "S3BucketName": "b1", "LogFileValidationEnabled": True}]}
+    mock_ct.describe_trails.return_value = {
+        "trailList": [
+            {
+                "Name": "t1",
+                "IsMultiRegionTrail": True,
+                "S3BucketName": "b1",
+                "LogFileValidationEnabled": True,
+            }
+        ]
+    }
     mock_ct.get_trail_status.return_value = {"IsLogging": True}
     mock_s3 = MagicMock()
     mock_s3.get_public_access_block.return_value = {
@@ -274,16 +305,27 @@ def test_sns_publish_when_drift(mock_boto_client, load_lambda):
 def test_excluded_log_group_not_in_scope(mock_boto_client, load_lambda):
     """Log groups matching exclude pattern are not in scope."""
     mock_logs = MagicMock()
-    mock_logs.get_paginator.return_value = _make_paginator([
-        {
-            "logGroups": [
-                {"logGroupName": "/aws/lambda/my-dev-fn", "retentionInDays": None},
-                {"logGroupName": "/aws/lambda/prod-fn", "retentionInDays": None},
-            ]
-        }
-    ])
+    mock_logs.get_paginator.return_value = _make_paginator(
+        [
+            {
+                "logGroups": [
+                    {"logGroupName": "/aws/lambda/my-dev-fn", "retentionInDays": None},
+                    {"logGroupName": "/aws/lambda/prod-fn", "retentionInDays": None},
+                ]
+            }
+        ]
+    )
     mock_ct = MagicMock()
-    mock_ct.describe_trails.return_value = {"trailList": [{"Name": "t1", "IsMultiRegionTrail": True, "S3BucketName": "b1", "LogFileValidationEnabled": True}]}
+    mock_ct.describe_trails.return_value = {
+        "trailList": [
+            {
+                "Name": "t1",
+                "IsMultiRegionTrail": True,
+                "S3BucketName": "b1",
+                "LogFileValidationEnabled": True,
+            }
+        ]
+    }
     mock_ct.get_trail_status.return_value = {"IsLogging": True}
     mock_s3 = MagicMock()
     mock_s3.get_public_access_block.return_value = {
@@ -402,7 +444,9 @@ def test_dashboard_filters_empty_lambda_and_table_names(mock_boto_client, load_l
         ]
     }
     mock_ddb = MagicMock()
-    mock_ddb.get_paginator.return_value = _make_paginator([{"TableNames": ["", "  ", "mother-hen-devices"]}])
+    mock_ddb.get_paginator.return_value = _make_paginator(
+        [{"TableNames": ["", "  ", "mother-hen-devices"]}]
+    )
     mock_sns = MagicMock()
     mock_sns.get_paginator.return_value = _make_paginator([{"Topics": []}])
     mock_cw = MagicMock()
@@ -434,7 +478,9 @@ def test_dashboard_filters_empty_lambda_and_table_names(mock_boto_client, load_l
             if isinstance(m, list):
                 for val in m:
                     if isinstance(val, str) and val.strip() == "":
-                        assert False, "Dashboard body must not contain empty dimension values"
+                        raise AssertionError(
+                            "Dashboard body must not contain empty dimension values"
+                        )
     assert call_kw["DashboardName"] == "MotherHen-Ops"
 
 

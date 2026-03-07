@@ -4,6 +4,7 @@ log-watcher-enroller Lambda: Ensure log groups have log-watcher subscription fil
 Scheduled (e.g. hourly) to attach subscription filters to new/existing log groups
 and repair drift. Uses allowlist prefixes and denylist patterns from env.
 """
+
 import hashlib
 import json
 import logging
@@ -18,15 +19,14 @@ logger.setLevel(logging.INFO)
 
 try:
     import mh_config
+
     mh_config.load_common_config()
 except ImportError:
     pass
 
 _REGION = os.environ.get("AWS_REGION", "us-east-2")
 FILTER_NAME = "log-watcher-alert"
-FILTER_PATTERN = (
-    "?ERROR ?error ?Exception ?exception ?failed ?Failed ?FATAL ?fatal"
-)
+FILTER_PATTERN = "?ERROR ?error ?Exception ?exception ?failed ?Failed ?FATAL ?fatal"
 # Delay after AddPermission so CloudWatch Logs can see the new resource policy.
 PERMISSION_PROPAGATION_SEC = 2
 
@@ -43,7 +43,9 @@ def _load_config() -> dict:
     """Load config from env."""
     fn_name = (os.environ.get("LOG_WATCHER_FUNCTION_NAME") or "suigetsukan-log-watcher").strip()
     prefixes = _parse_comma_list("LOG_GROUP_INCLUDE_PREFIXES", ["/aws/lambda/", "/aws/apigateway/"])
-    exclude = _parse_comma_list("LOG_GROUP_EXCLUDE_PATTERNS", ["dev", "test", "sandbox", "experimental"])
+    exclude = _parse_comma_list(
+        "LOG_GROUP_EXCLUDE_PATTERNS", ["dev", "test", "sandbox", "experimental"]
+    )
     return {
         "function_name": fn_name,
         "include_prefixes": prefixes,
@@ -140,14 +142,17 @@ def _put_filter_with_retry(logs_client, log_group_name: str, function_arn: str) 
                 raise
             logger.info(
                 "put_subscription_filter waiting %ds for permission propagation (%s, attempt %d)",
-                delay, log_group_name, attempt + 1,
+                delay,
+                log_group_name,
+                attempt + 1,
             )
             time.sleep(delay)
             delay *= 2
 
 
-def _enroll_log_group(logs_client, lambda_client, log_group_name: str,
-                      function_arn: str, base_arn: str) -> bool:
+def _enroll_log_group(
+    logs_client, lambda_client, log_group_name: str, function_arn: str, base_arn: str
+) -> bool:
     """Attach subscription filter to log group. Return True if enrolled or already correct."""
     if _has_correct_filter(logs_client, log_group_name, function_arn):
         return True

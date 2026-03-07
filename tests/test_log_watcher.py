@@ -172,7 +172,7 @@ def test_log_watcher_enroller_summary_ignored_by_default(mock_boto_client, load_
         [
             {
                 "message": "[INFO]\t2026-02-20T12:56:54.265Z\te5ba0523-1020-415e-8709-4adb81979f3c\t"
-                "log-watcher-enroller summary: {\"enrolled\": 18, \"skipped\": 5, \"failed\": 0}"
+                'log-watcher-enroller summary: {"enrolled": 18, "skipped": 5, "failed": 0}'
             }
         ],
     )

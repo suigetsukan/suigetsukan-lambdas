@@ -4,6 +4,7 @@ log-watcher Lambda: CloudWatch Logs alert dispatcher.
 Receives CloudWatch Logs subscription events, matches error-level keywords,
 dedupes and throttles, then publishes SMS alerts to the Support SNS topic.
 """
+
 import base64
 import gzip
 import hashlib
@@ -12,7 +13,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import boto3
 from botocore.exceptions import ClientError
@@ -22,6 +23,7 @@ logger.setLevel(logging.INFO)
 
 try:
     import mh_config
+
     mh_config.load_common_config()
 except ImportError:
     pass
@@ -36,15 +38,31 @@ LAMBDA_NAME_LOG_WATCHER = "log-watcher"
 def _log_watcher_metric(name: str, value: float, extra: dict | None = None) -> None:
     try:
         import cloudwatch_metrics as cw
+
         cw.put_metric(LAMBDA_NAME_LOG_WATCHER, name, value, extra_dimensions=extra)
-    except Exception:
+    except Exception:  # noqa: S110, BLE001 - optional metrics; ignore if missing
         pass
 
+
 DEFAULT_KEYWORDS = [
-    "error", "fatal", "panic", "failed", "failure", "abort", "crash",
-    "exception", "traceback", "unhandled", "stack trace",
-    "deprecated", "timeout", "timed out", "oom", "out of memory",
-    "killed", "signal: killed",
+    "error",
+    "fatal",
+    "panic",
+    "failed",
+    "failure",
+    "abort",
+    "crash",
+    "exception",
+    "traceback",
+    "unhandled",
+    "stack trace",
+    "deprecated",
+    "timeout",
+    "timed out",
+    "oom",
+    "out of memory",
+    "killed",
+    "signal: killed",
 ]
 UUID_PATTERN = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
@@ -116,7 +134,9 @@ def _load_config() -> dict:
     """Load config from env."""
     return {
         "alert_topic_arn": (os.environ.get("SNS_SUPPORT_TOPIC_ARN") or "").strip(),
-        "dedup_table": (os.environ.get("AWS_DDB_DEDUP_TABLE_NAME") or "suigetsukan-log-watcher-dedup").strip(),
+        "dedup_table": (
+            os.environ.get("AWS_DDB_DEDUP_TABLE_NAME") or "suigetsukan-log-watcher-dedup"
+        ).strip(),
         "env_label": (os.environ.get("ENV") or "prod").strip(),
         "keywords": _parse_keywords(),
         "ignore_patterns": _parse_ignore_patterns(),
@@ -158,9 +178,20 @@ def _is_warning_only(msg: str) -> bool:
     lower = msg.lower()
     warning_indicators = ("warn", "warning")
     serious_indicators = (
-        "error", "fatal", "panic", "exception", "crash",
-        "failed", "failure", "abort", "oom", "out of memory",
-        "killed", "traceback", "unhandled", "stack trace",
+        "error",
+        "fatal",
+        "panic",
+        "exception",
+        "crash",
+        "failed",
+        "failure",
+        "abort",
+        "oom",
+        "out of memory",
+        "killed",
+        "traceback",
+        "unhandled",
+        "stack trace",
     )
     has_warn = any(w in lower for w in warning_indicators)
     has_serious = any(s in lower for s in serious_indicators)
@@ -233,8 +264,9 @@ def _get_throttle_count(ddb, table: str, log_group: str, window_start: int) -> i
         return 0
 
 
-def _increment_throttle(ddb, table: str, log_group: str, window_start: int,
-                       throttle_window_sec: int) -> None:
+def _increment_throttle(
+    ddb, table: str, log_group: str, window_start: int, throttle_window_sec: int
+) -> None:
     """Increment throttle counter and set TTL."""
     pk = f"throttle:{log_group}"
     sk = str(window_start)
@@ -255,16 +287,17 @@ def _increment_throttle(ddb, table: str, log_group: str, window_start: int,
         logger.warning("DynamoDB update throttle failed: %s", e)
 
 
-def _build_sms_body(config: dict, log_group: str, log_stream: str,
-                    matches: list[dict]) -> str:
+def _build_sms_body(config: dict, log_group: str, log_stream: str, matches: list[dict]) -> str:
     """Build SMS message body, truncated to max_sms_len."""
     env_label = config["env_label"]
     first = matches[0] if matches else {}
     severity = first.get("severity", "ALERT")
     first_ts = first.get("timestamp")
-    time_str = datetime.fromtimestamp(first_ts / 1000, tz=timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    ) if first_ts else "?"
+    time_str = (
+        datetime.fromtimestamp(first_ts / 1000, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if first_ts
+        else "?"
+    )
 
     lines = [
         f"[{env_label}] CloudWatch Log Alert ({severity})",
@@ -301,7 +334,7 @@ def _send_throttle_suppressed(cfg: dict, ddb, throttle_info: dict, ctx: dict) ->
     try:
         _get_sns().publish(
             TopicArn=cfg["alert_topic_arn"],
-            Message=suppressed_msg[:cfg["max_sms_len"]],
+            Message=suppressed_msg[: cfg["max_sms_len"]],
         )
         ctx["published"] += 1
     except ClientError as e:
@@ -348,12 +381,14 @@ def _collect_matches(log_events: list, log_group: str, opts: dict) -> tuple[list
             deduped_count += 1
             continue
 
-        matches.append({
-            "id": evt.get("id"),
-            "timestamp": evt.get("timestamp"),
-            "message": msg,
-            "severity": _severity_hint(msg),
-        })
+        matches.append(
+            {
+                "id": evt.get("id"),
+                "timestamp": evt.get("timestamp"),
+                "message": msg,
+                "severity": _severity_hint(msg),
+            }
+        )
         _record_dedupe(ddb, table, dkey, expires_at)
 
     return matches, deduped_count, ignored_count
@@ -401,7 +436,8 @@ def _process_batch(payload: dict, config: dict, ctx: dict) -> None:
     if current == throttle_max:
         ctx["throttled"] += 1
         _send_throttle_suppressed(
-            cfg, ddb,
+            cfg,
+            ddb,
             {"log_group": log_group, "match_count": len(matches), "window_start": window_start},
             ctx,
         )

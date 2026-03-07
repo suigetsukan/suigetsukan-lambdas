@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 import boto3
@@ -23,6 +23,7 @@ logger.setLevel(logging.INFO)
 
 try:
     import mh_config
+
     mh_config.load_common_config()
 except ImportError:
     pass
@@ -97,8 +98,12 @@ def _get_base_config():
         "high_risk_retention_days": _parse_int(_env("HIGH_RISK_RETENTION_DAYS"), 90),
         "log_group_exceptions": _parse_exceptions_json(),
         "log_group_include_prefixes": include_prefixes,
-        "log_group_exclude_patterns": _parse_comma_list("LOG_GROUP_EXCLUDE_PATTERNS", "dev,test,sandbox,experimental"),
-        "high_risk_patterns": _parse_comma_list("HIGH_RISK_PATTERNS", "cognito,provision,ota,auth,signup,token"),
+        "log_group_exclude_patterns": _parse_comma_list(
+            "LOG_GROUP_EXCLUDE_PATTERNS", "dev,test,sandbox,experimental"
+        ),
+        "high_risk_patterns": _parse_comma_list(
+            "HIGH_RISK_PATTERNS", "cognito,provision,ota,auth,signup,token"
+        ),
         "require_cloudtrail": _parse_bool(_env("REQUIRE_CLOUDTRAIL"), True),
         "require_multi_region_trail": _parse_bool(_env("REQUIRE_MULTI_REGION_TRAIL"), True),
         "require_log_file_validation": _parse_bool(_env("REQUIRE_LOG_FILE_VALIDATION"), True),
@@ -122,8 +127,12 @@ def _get_feature_and_alarm_config():
         "enable_retention": _parse_bool(os.environ.get("ENABLE_RETENTION"), True),
         "enable_alarms": _parse_bool(os.environ.get("ENABLE_ALARMS"), True),
         "enable_dashboard": _parse_bool(os.environ.get("ENABLE_DASHBOARD"), True),
-        "enable_cloudtrail_tripwires": _parse_bool(os.environ.get("ENABLE_CLOUDTRAIL_TRIPWIRES"), True),
-        "enable_cloudtrail_s3_posture": _parse_bool(os.environ.get("ENABLE_CLOUDTRAIL_S3_POSTURE"), False),
+        "enable_cloudtrail_tripwires": _parse_bool(
+            os.environ.get("ENABLE_CLOUDTRAIL_TRIPWIRES"), True
+        ),
+        "enable_cloudtrail_s3_posture": _parse_bool(
+            os.environ.get("ENABLE_CLOUDTRAIL_S3_POSTURE"), False
+        ),
         "critical_lambda_prefixes": _parse_comma_list("CRITICAL_LAMBDA_PREFIXES", "suigetsukan-"),
         "critical_lambdas": _parse_comma_list("CRITICAL_LAMBDAS", ""),
         "ddb_table_prefixes": _parse_comma_list("DDB_TABLE_PREFIXES", ""),
@@ -131,8 +140,11 @@ def _get_feature_and_alarm_config():
         "sns_topic_prefixes": _parse_comma_list("SNS_TOPIC_PREFIXES", ""),
         "sns_topics": _parse_comma_list("SNS_TOPICS", ""),
         "alarm_sns_topic_arn": (os.environ.get("ALARM_SNS_TOPIC_ARN") or "").strip() or None,
-        "cloudtrail_log_group_name": (os.environ.get("CLOUDTRAIL_LOG_GROUP_NAME") or "").strip() or None,
-        "cloudtrail_metric_namespace": (os.environ.get("CLOUDTRAIL_METRIC_NAMESPACE") or "Security/CloudTrail").strip(),
+        "cloudtrail_log_group_name": (os.environ.get("CLOUDTRAIL_LOG_GROUP_NAME") or "").strip()
+        or None,
+        "cloudtrail_metric_namespace": (
+            os.environ.get("CLOUDTRAIL_METRIC_NAMESPACE") or "Security/CloudTrail"
+        ).strip(),
         "dashboard_name": (os.environ.get("DASHBOARD_NAME") or "MotherHen-Ops").strip(),
     }
 
@@ -164,9 +176,7 @@ def _is_log_group_in_scope(name, config):
     if not any(name.startswith(p) for p in prefixes):
         return False
     exclude = config["log_group_exclude_patterns"]
-    if any(pat.lower() in name.lower() for pat in exclude):
-        return False
-    return True
+    return not any(pat.lower() in name.lower() for pat in exclude)
 
 
 def _get_target_retention_days(log_group_name, config):
@@ -185,13 +195,12 @@ def _put_retention_with_backoff(logs_client, log_group_name, retention_days):
     for attempt in range(5):
         try:
             logs_client.put_retention_policy(
-                logGroupName=log_group_name,
-                retentionInDays=retention_days
+                logGroupName=log_group_name, retentionInDays=retention_days
             )
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] == "ThrottlingException":
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
                 continue
             raise
     return False
@@ -215,15 +224,28 @@ def _scan_log_groups_region(logs_client, region, config, mode):
             target = _get_target_retention_days(name, config)
             if current is None or current != target:
                 result["drifted"] += 1
-                finding = {"log_group": name, "current": current, "target": target, "region": region}
+                finding = {
+                    "log_group": name,
+                    "current": current,
+                    "target": target,
+                    "region": region,
+                }
                 result["findings"].append(finding)
-                logger.info("DRIFT log_group=%s region=%s current=%s target=%s", name, region, current, target)
+                logger.info(
+                    "DRIFT log_group=%s region=%s current=%s target=%s",
+                    name,
+                    region,
+                    current,
+                    target,
+                )
                 if mode == "APPLY":
                     try:
                         _put_retention_with_backoff(logs_client, name, target)
                         result["fixed"] += 1
                         finding["action"] = "fixed"
-                        logger.info("FIXED log_group=%s region=%s retention=%s", name, region, target)
+                        logger.info(
+                            "FIXED log_group=%s region=%s retention=%s", name, region, target
+                        )
                     except ClientError as e:
                         result["failed"] += 1
                         finding["action"] = "failed"
@@ -234,7 +256,14 @@ def _scan_log_groups_region(logs_client, region, config, mode):
 
 def _run_logs_retention(config, mode, regions):
     """Run CloudWatch Logs retention scan/remediation across regions. Returns aggregated result."""
-    aggregated = {"scanned": 0, "in_scope": 0, "drifted": 0, "fixed": 0, "failed": 0, "findings": []}
+    aggregated = {
+        "scanned": 0,
+        "in_scope": 0,
+        "drifted": 0,
+        "fixed": 0,
+        "failed": 0,
+        "findings": [],
+    }
     for region in regions:
         try:
             logs_client = boto3.client("logs", region_name=region, config=_RETRY_CONFIG)
@@ -262,16 +291,20 @@ def _audit_one_trail(trail, cloudtrail_client, config, required_bucket):
     except ClientError:
         pass
     if not trail.get("LogFileValidationEnabled") and config["require_log_file_validation"]:
-        findings.append({"category": "cloudtrail", "trail": name, "issue": "log_file_validation_disabled"})
+        findings.append(
+            {"category": "cloudtrail", "trail": name, "issue": "log_file_validation_disabled"}
+        )
     bucket = (trail.get("S3BucketName") or "").strip()
     if required_bucket and bucket != required_bucket:
-        findings.append({
-            "category": "cloudtrail",
-            "trail": name,
-            "issue": "wrong_bucket",
-            "expected": required_bucket,
-            "actual": bucket
-        })
+        findings.append(
+            {
+                "category": "cloudtrail",
+                "trail": name,
+                "issue": "wrong_bucket",
+                "expected": required_bucket,
+                "actual": bucket,
+            }
+        )
     return findings
 
 
@@ -289,16 +322,20 @@ def _run_cloudtrail_audit(cloudtrail_client, config):
         return findings
 
     if config["require_cloudtrail"] and not trails:
-        findings.append({"category": "cloudtrail", "issue": "no_trail", "message": "No CloudTrail found"})
+        findings.append(
+            {"category": "cloudtrail", "issue": "no_trail", "message": "No CloudTrail found"}
+        )
         return findings
 
     multi_region = [t for t in trails if t.get("IsMultiRegionTrail")]
     if config["require_multi_region_trail"] and not multi_region:
-        findings.append({
-            "category": "cloudtrail",
-            "issue": "no_multi_region_trail",
-            "message": "No multi-region trail"
-        })
+        findings.append(
+            {
+                "category": "cloudtrail",
+                "issue": "no_multi_region_trail",
+                "message": "No multi-region trail",
+            }
+        )
 
     required_bucket = config["cloudtrail_s3_bucket"]
     for trail in trails:
@@ -331,8 +368,7 @@ def _s3_check_block_public_access(s3_client, bucket_name, config, mode):
             return findings, actions
     if findings and mode == "APPLY" and config["require_block_public_access"]:
         s3_client.put_public_access_block(
-            Bucket=bucket_name,
-            PublicAccessBlockConfiguration=_PAB_CONFIG
+            Bucket=bucket_name, PublicAccessBlockConfiguration=_PAB_CONFIG
         )
         actions.append({"bucket": bucket_name, "action": "put_public_access_block"})
     return findings, actions
@@ -347,8 +383,7 @@ def _s3_check_versioning(s3_client, bucket_name, config, mode):
         findings.append({"bucket": bucket_name, "issue": "versioning_disabled"})
         if mode == "APPLY":
             s3_client.put_bucket_versioning(
-                Bucket=bucket_name,
-                VersioningConfiguration={"Status": "Enabled"}
+                Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"}
             )
             actions.append({"bucket": bucket_name, "action": "put_bucket_versioning"})
     return findings, actions
@@ -372,8 +407,10 @@ def _s3_check_encryption(s3_client, bucket_name, config, mode):
                 s3_client.put_bucket_encryption(
                     Bucket=bucket_name,
                     ServerSideEncryptionConfiguration={
-                        "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
-                    }
+                        "Rules": [
+                            {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
+                        ]
+                    },
                 )
                 actions.append({"bucket": bucket_name, "action": "put_bucket_encryption"})
             except ClientError as err:
@@ -400,13 +437,15 @@ def _s3_check_lifecycle(s3_client, bucket_name, config, mode):
             s3_client.put_bucket_lifecycle_configuration(
                 Bucket=bucket_name,
                 LifecycleConfiguration={
-                    "Rules": [{
-                        "ID": "CloudTrailRetention",
-                        "Status": "Enabled",
-                        "Filter": {"Prefix": config["cloudtrail_s3_prefix"] or ""},
-                        "Expiration": {"Days": config["cloudtrail_retention_years"] * 365},
-                    }]
-                }
+                    "Rules": [
+                        {
+                            "ID": "CloudTrailRetention",
+                            "Status": "Enabled",
+                            "Filter": {"Prefix": config["cloudtrail_s3_prefix"] or ""},
+                            "Expiration": {"Days": config["cloudtrail_retention_years"] * 365},
+                        }
+                    ]
+                },
             )
             actions.append({"bucket": bucket_name, "action": "put_bucket_lifecycle"})
     return findings, actions
@@ -493,10 +532,17 @@ def _run_lambda_alarms(cw, lam, config, mode, out):
         for metric, suffix in [("Errors", "Errors"), ("Throttles", "Throttles")]:
             out["scanned"] += 1
             aname = f"Janitor-{fname}-{suffix}"
-            if _ensure_alarm(cw, {
-                    "alarm_name": aname, "namespace": "AWS/Lambda", "metric_name": metric,
-                    "dimensions": dims, "topic_arn": topic,
-            }, mode):
+            if _ensure_alarm(
+                cw,
+                {
+                    "alarm_name": aname,
+                    "namespace": "AWS/Lambda",
+                    "metric_name": metric,
+                    "dimensions": dims,
+                    "topic_arn": topic,
+                },
+                mode,
+            ):
                 out["created"] += 1
                 out["actions"].append({"alarm": aname, "type": "lambda", "metric": metric})
             elif mode == "APPLY":
@@ -511,10 +557,17 @@ def _ensure_ddb_alarm(cw, spec: dict, mode: str, out: dict) -> None:
     out["scanned"] += 1
     dims = [{"Name": "TableName", "Value": tname}]
     aname = f"Janitor-DDB-{tname}-{metric}"
-    if _ensure_alarm(cw, {
-            "alarm_name": aname, "namespace": "AWS/DynamoDB", "metric_name": metric,
-            "dimensions": dims, "topic_arn": topic,
-    }, mode):
+    if _ensure_alarm(
+        cw,
+        {
+            "alarm_name": aname,
+            "namespace": "AWS/DynamoDB",
+            "metric_name": metric,
+            "dimensions": dims,
+            "topic_arn": topic,
+        },
+        mode,
+    ):
         out["created"] += 1
         out["actions"].append({"alarm": aname, "type": "dynamodb", "metric": metric})
     elif mode == "APPLY":
@@ -544,8 +597,12 @@ def _run_ddb_alarms(cw, ddb, config, mode, out):
     tables = _resolve_ddb_tables(ddb, config)
     topic = config.get("alarm_sns_topic_arn")
     for tname in tables:
-        _ensure_ddb_alarm(cw, {"table": tname, "metric": "ThrottledRequests", "topic_arn": topic}, mode, out)
-        _ensure_ddb_alarm(cw, {"table": tname, "metric": "SystemErrors", "topic_arn": topic}, mode, out)
+        _ensure_ddb_alarm(
+            cw, {"table": tname, "metric": "ThrottledRequests", "topic_arn": topic}, mode, out
+        )
+        _ensure_ddb_alarm(
+            cw, {"table": tname, "metric": "SystemErrors", "topic_arn": topic}, mode, out
+        )
 
 
 def _ensure_sns_alarm(cw, tarn, topic, mode, out):
@@ -554,10 +611,17 @@ def _ensure_sns_alarm(cw, tarn, topic, mode, out):
     name = tarn.split(":")[-1] if ":" in tarn else tarn
     dims = [{"Name": "TopicName", "Value": name}]
     aname = f"Janitor-SNS-{name}-NotificationsFailed"
-    if _ensure_alarm(cw, {
-            "alarm_name": aname, "namespace": "AWS/SNS", "metric_name": "NumberOfNotificationsFailed",
-            "dimensions": dims, "topic_arn": topic,
-    }, mode):
+    if _ensure_alarm(
+        cw,
+        {
+            "alarm_name": aname,
+            "namespace": "AWS/SNS",
+            "metric_name": "NumberOfNotificationsFailed",
+            "dimensions": dims,
+            "topic_arn": topic,
+        },
+        mode,
+    ):
         out["created"] += 1
         out["actions"].append({"alarm": aname, "type": "sns"})
     elif mode == "APPLY":
@@ -740,9 +804,18 @@ def _build_sns_message(result, config):
 
 _TRIPWIRE_DEFS = [
     {"name": "RootLogin", "pattern": '{ $.userIdentity.type = "Root" }'},
-    {"name": "StopLoggingOrDeleteTrail", "pattern": '{ ($.eventName = "StopLogging") || ($.eventName = "DeleteTrail") }'},
-    {"name": "IAMPolicyChange", "pattern": '{ ($.eventName = "AttachRolePolicy") || ($.eventName = "DetachRolePolicy") || ($.eventName = "PutRolePolicy") || ($.eventName = "DeleteRolePolicy") }'},
-    {"name": "IoTPolicyChange", "pattern": '{ ($.eventName = "CreatePolicy") || ($.eventName = "DeletePolicy") || ($.eventName = "AttachPolicy") || ($.eventName = "DetachPolicy") }'},
+    {
+        "name": "StopLoggingOrDeleteTrail",
+        "pattern": '{ ($.eventName = "StopLogging") || ($.eventName = "DeleteTrail") }',
+    },
+    {
+        "name": "IAMPolicyChange",
+        "pattern": '{ ($.eventName = "AttachRolePolicy") || ($.eventName = "DetachRolePolicy") || ($.eventName = "PutRolePolicy") || ($.eventName = "DeleteRolePolicy") }',
+    },
+    {
+        "name": "IoTPolicyChange",
+        "pattern": '{ ($.eventName = "CreatePolicy") || ($.eventName = "DeletePolicy") || ($.eventName = "AttachPolicy") || ($.eventName = "DetachPolicy") }',
+    },
     {"name": "DeleteLogGroup", "pattern": '{ $.eventName = "DeleteLogGroup" }'},
 ]
 
@@ -751,7 +824,10 @@ def _run_cloudtrail_tripwires(region, config, mode, result):
     """Create CloudTrail metric filters + alarms. Skip if CLOUDTRAIL_LOG_GROUP_NAME unset."""
     log_group = config.get("cloudtrail_log_group_name")
     if not log_group:
-        result["findings"]["cloudtrail_tripwires"] = {"skipped": True, "reason": "CLOUDTRAIL_LOG_GROUP_NAME not set"}
+        result["findings"]["cloudtrail_tripwires"] = {
+            "skipped": True,
+            "reason": "CLOUDTRAIL_LOG_GROUP_NAME not set",
+        }
         logger.info("SKIPPED cloudtrail_tripwires=CLOUDTRAIL_LOG_GROUP_NAME not set")
         return
     namespace = config.get("cloudtrail_metric_namespace", "Security/CloudTrail")
@@ -768,29 +844,45 @@ def _run_cloudtrail_tripwires(region, config, mode, result):
                     logGroupName=log_group,
                     filterName=mname,
                     filterPattern=tw["pattern"],
-                    metricTransformations=[{
-                        "metricName": tw["name"],
-                        "metricNamespace": namespace,
-                        "metricValue": 1,
-                    }]
+                    metricTransformations=[
+                        {
+                            "metricName": tw["name"],
+                            "metricNamespace": namespace,
+                            "metricValue": 1,
+                        }
+                    ],
                 )
                 dims = []
                 aname = f"Janitor-{mname}"
-                if _ensure_alarm(cw, {
-                        "alarm_name": aname, "namespace": namespace, "metric_name": tw["name"],
-                        "dimensions": dims, "topic_arn": topic,
-                }, mode):
+                if _ensure_alarm(
+                    cw,
+                    {
+                        "alarm_name": aname,
+                        "namespace": namespace,
+                        "metric_name": tw["name"],
+                        "dimensions": dims,
+                        "topic_arn": topic,
+                    },
+                    mode,
+                ):
                     out["created"] += 1
                     out["actions"].append({"filter": mname, "alarm": aname})
             except ClientError as e:
                 logger.error("cloudtrail_tripwires error filter=%s: %s", mname, e)
                 out["failed"] += 1
-                result["errors"].append({"stage": "cloudtrail_tripwires", "filter": mname, "error": str(e)})
+                result["errors"].append(
+                    {"stage": "cloudtrail_tripwires", "filter": mname, "error": str(e)}
+                )
     result["findings"]["cloudtrail_tripwires"] = out
     for a in out.get("actions", []):
         logger.info("FIXED tripwire filter=%s alarm=%s", a.get("filter"), a.get("alarm"))
     if out["scanned"] > 0:
-        logger.info("cloudtrail_tripwires scanned=%d created=%d failed=%d", out["scanned"], out["created"], out["failed"])
+        logger.info(
+            "cloudtrail_tripwires scanned=%d created=%d failed=%d",
+            out["scanned"],
+            out["created"],
+            out["failed"],
+        )
 
 
 def _collect_tables_for_dashboard(ddb, config):
@@ -852,8 +944,7 @@ def _run_dashboard(region, config, mode, result):
         try:
             cw = boto3.client("cloudwatch", region_name=region, config=_RETRY_CONFIG)
             cw.put_dashboard(
-                DashboardName=dashboard_name,
-                DashboardBody=json.dumps({"widgets": widgets})
+                DashboardName=dashboard_name, DashboardBody=json.dumps({"widgets": widgets})
             )
             out["created"] = True
             logger.info("FIXED dashboard=%s", dashboard_name)
@@ -909,7 +1000,7 @@ def _publish_sns_summary(config, result):
         sns.publish(
             TopicArn=config["sns_topic_arn"],
             Subject="Janitor summary",
-            Message=_build_sns_message(result, config)
+            Message=_build_sns_message(result, config),
         )
     except ClientError as e:
         logger.exception("Failed to publish SNS: %s", e)
@@ -920,7 +1011,7 @@ def lambda_handler(event, context):
     Entrypoint. Load config, run logs retention then CloudTrail then S3 audit;
     build result; optionally publish SNS; return JSON result.
     """
-    start = datetime.now(timezone.utc).isoformat()
+    start = datetime.now(UTC).isoformat()
     config = _get_config()
     mode = config["mode"]
     if mode not in ("AUDIT", "APPLY"):
@@ -980,7 +1071,10 @@ def lambda_handler(event, context):
     if config.get("enable_cloudtrail_tripwires", True):
         _run_cloudtrail_tripwires(primary_region, config, mode, result)
     else:
-        result["findings"]["cloudtrail_tripwires"] = {"skipped": True, "reason": "ENABLE_CLOUDTRAIL_TRIPWIRES is false"}
+        result["findings"]["cloudtrail_tripwires"] = {
+            "skipped": True,
+            "reason": "ENABLE_CLOUDTRAIL_TRIPWIRES is false",
+        }
         logger.info("SKIPPED cloudtrail_tripwires=ENABLE_CLOUDTRAIL_TRIPWIRES is false")
 
     # Dashboard - gated by ENABLE_DASHBOARD
@@ -990,7 +1084,7 @@ def lambda_handler(event, context):
         result["findings"]["dashboard"] = {"skipped": True}
         logger.info("SKIPPED dashboard=ENABLE_DASHBOARD is false")
 
-    result["execution_metadata"]["end"] = datetime.now(timezone.utc).isoformat()
+    result["execution_metadata"]["end"] = datetime.now(UTC).isoformat()
     logger.info(
         "complete mode=%s actions_taken=%d errors=%d",
         mode,

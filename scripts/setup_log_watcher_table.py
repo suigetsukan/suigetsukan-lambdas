@@ -5,6 +5,7 @@ Create DynamoDB table for log-watcher dedupe and throttle state.
 Run once per account/region before deploying the log-watcher Lambda.
 Uses PAY_PER_REQUEST billing and TTL for automatic cleanup.
 """
+
 from __future__ import annotations
 
 import argparse
