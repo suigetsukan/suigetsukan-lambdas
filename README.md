@@ -192,6 +192,17 @@ To run all tests: `./scripts/run_tests.sh` (or `pytest tests/ -v`).
 
 Tests run on push and pull request via GitHub Actions. **Deploy only proceeds if all lint, type, security, and test checks pass.**
 
+### Test then push
+
+Verify locally, then push (per CI-deploy-verify):
+
+1. **Run tests:** `./scripts/run_tests.sh` (from repo root; use `.venv` or install deps first).
+2. **Commit** if you have uncommitted changes (e.g. `feat: …` for a feature).
+3. **Pull with rebase** if remote is ahead: `git pull --rebase`.
+4. **Push:** `git push` (or `git push origin main`).
+
+Convenience: after committing, run `./scripts/test_then_push.sh` to run tests and, if they pass, pull with rebase and push. The script does not run `git add` or `git commit`.
+
 ---
 
 ## Deployment

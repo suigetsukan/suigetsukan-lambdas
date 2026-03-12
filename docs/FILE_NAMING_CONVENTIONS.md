@@ -2,6 +2,8 @@
 
 The **file-name-decipher** Lambda processes video filenames (URL stubs: lowercase, no extension) and routes them to curriculum-specific DynamoDB tables. Routing is based on the first character of the file stem.
 
+**Exhaustive reference:** For every technique and its exact filename pattern in table form, see **[TECHNIQUE_TO_FILENAME_REFERENCE.md](TECHNIQUE_TO_FILENAME_REFERENCE.md)**. That document was reverse-engineered from the Lambda and mapping code and is the authoritative technique-to-filename reference.
+
 **General rules:**
 - File stems are lowercase with no extension.
 - The last character is typically a variation letter (`a`–`y`).
@@ -11,11 +13,13 @@ The **file-name-decipher** Lambda processes video filenames (URL stubs: lowercas
 
 ## Art Routing (First Character)
 
-| Prefix | Art       | Notes                                              |
-|--------|-----------|----------------------------------------------------|
-| `a`    | Aikido    | Scroll codes `a01`–`a43`                           |
-| `b`–`m`| Battodo   | Excludes `a` and `d`; scroll char = first letter   |
-| `d`    | Danzan Ryu| Scroll char = first letter                         |
+Only three prefixes are used. A file is never prefixed by any other character.
+
+| Prefix | Art        | Notes                    |
+|--------|------------|---------------------------|
+| `a`    | Aikido     | Scroll codes `a01`–`a43`  |
+| `b`    | Battodo    | —                         |
+| `d`    | Danzan Ryu | —                         |
 
 ---
 
@@ -113,8 +117,10 @@ Full mappings: `common/danzan_ryu_mappings.py`.
 
 ## Summary
 
-| Art       | Prefix(es) | Variation Letter | Source Files                                              |
-|-----------|------------|------------------|-----------------------------------------------------------|
-| Aikido    | `a`        | Last char `[a-z]`| `common/aikido_mappings.py`, `lambdas/file-name-decipher/aikido.py` |
-| Battodo   | `b,c,e,f,g,h,i,j,k,l,m` | Last char `[a-y]` | `common/battodo_mappings.py`, `lambdas/file-name-decipher/battodo.py` |
-| Danzan Ryu| `d`        | Depends on scroll| `common/danzan_ryu_mappings.py`, `lambdas/file-name-decipher/danzan_ryu.py` |
+| Art       | Prefix | Variation Letter | Source Files                                              |
+|-----------|--------|------------------|-----------------------------------------------------------|
+| Aikido    | `a`    | Last char `[a-z]`| `common/aikido_mappings.py`, `lambdas/file-name-decipher/aikido.py` |
+| Battodo   | `b`    | Last char `[a-y]`| `common/battodo_mappings.py`, `lambdas/file-name-decipher/battodo.py` |
+| Danzan Ryu| `d`    | Depends on scroll| `common/danzan_ryu_mappings.py`, `lambdas/file-name-decipher/danzan_ryu.py` |
+
+For a complete **technique → filename** table per scroll (reverse-engineered from the Lambda), see [TECHNIQUE_TO_FILENAME_REFERENCE.md](TECHNIQUE_TO_FILENAME_REFERENCE.md).
