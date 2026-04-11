@@ -84,6 +84,9 @@ def build_env_vars(config: dict, lambda_name: str) -> dict:
     env_vars = {}
     config_env = config.get("env_vars", {})
     optional_keys = {k.upper().replace("-", "_") for k in config.get("optional_env_vars", [])}
+    # cognito-backup never uses a single pool ID; treat as optional so deploy never requires it
+    if lambda_name == "cognito-backup":
+        optional_keys.add("AWS_COGNITO_USER_POOL_ID")
     if not config_env:
         print("  no env_vars – skipping environment variables")
         return {}
@@ -172,6 +175,9 @@ def deploy_lambda(lambda_dir: Path):
             shutil.rmtree(common_dest)
 
         env_vars = build_env_vars(config, lambda_dir.name)
+        # cognito-backup always backs up all user pools in the region; never pass a single pool ID
+        if lambda_dir.name == "cognito-backup":
+            env_vars.pop("AWS_COGNITO_USER_POOL_ID", None)
         region = os.getenv("AWS_REGION", "us-west-1")
         lambda_client = boto3.client("lambda", region_name=region)
         function_arn = (

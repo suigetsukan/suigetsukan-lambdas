@@ -1,0 +1,116 @@
+---
+description: MISRA C safety principles for C/ESP-IDF firmware
+globs: "**/*.c,**/*.h"
+alwaysApply: false
+---
+
+# MISRA C Principles for C Code
+
+Applies when editing C sources. Compiled from gecl-app-common, C2DS-*, GGG-* AGENTS_MISRA.md.
+
+## Core Mandate
+
+**ALWAYS** follow these MISRA-inspired safety principles when writing or modifying C code:
+
+## 1. No Recursion
+
+**Rule:** Never write recursive functions. Use iterative algorithms with explicit stacks.
+
+**Why:** Recursion can cause stack overflow on embedded systems with limited RAM.
+
+## 2. Validate ALL Input Parameters
+
+**Rule:** Check every pointer (NULL) and validate all input ranges before use.
+
+```c
+// GOOD
+esp_err_t my_fn(const char *ptr, size_t size) {
+    if (ptr == NULL) return ESP_ERR_INVALID_ARG;
+    if (size == 0 || size > MAX_SIZE) return ESP_ERR_INVALID_SIZE;
+    // ...
+}
+```
+
+## 3. Bounds Check ALL Array Access
+
+**Rule:** Never access arrays without verifying index is in bounds.
+
+```c
+// BAD: uint8_t v = array[index];
+// GOOD:
+if (index < array_size) {
+    uint8_t v = array[index];
+} else {
+    return ESP_ERR_INVALID_ARG;
+}
+```
+
+## 4. Safe Memory Allocation
+
+**Rule:** Check allocation result. Use safe realloc pattern (never lose original pointer on realloc failure).
+
+```c
+// BAD: ptr = realloc(ptr, n); if (!ptr) return err;  // Lost original!
+// GOOD:
+void *new_ptr = realloc(ptr, n);
+if (!new_ptr) { free(ptr); return ESP_ERR_NO_MEM; }
+ptr = new_ptr;
+```
+
+## 5. Use snprintf, NEVER sprintf
+
+**Rule:** Always use bounded string operations.
+
+```c
+// BAD: sprintf(buffer, "Value: %d", value);
+// GOOD: snprintf(buffer, sizeof(buffer), "Value: %d", value);
+```
+
+Check snprintf return for truncation: `ret < 0 || ret >= size`
+
+## 6. Explicit Error Handling
+
+**Rule:** Never ignore return values. No `ESP_ERROR_CHECK()` in production code (except unrecoverable init in app_main).
+
+```c
+// BAD: some_function();
+// GOOD:
+esp_err_t err = some_function();
+if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed: %s", esp_err_to_name(err));
+    return err;
+}
+```
+
+## 7. Overflow-Safe Arithmetic
+
+**Rule:** Check for overflow before arithmetic that could overflow.
+
+```c
+// BAD: uint32_t r = a + b;
+// GOOD:
+if (a > (UINT32_MAX - b)) return ESP_ERR_INVALID_SIZE;
+uint32_t r = a + b;
+```
+
+## 8. Document Function Contracts
+
+**Rule:** Document preconditions and postconditions for all public functions.
+
+## 9. Avoid Pointer Arithmetic
+
+**Rule:** Prefer array indexing over pointer arithmetic where possible.
+
+## Red Flags to Avoid
+
+- ❌ Recursion
+- ❌ sprintf() instead of snprintf()
+- ❌ ESP_ERROR_CHECK() (except app_main)
+- ❌ Unsafe realloc() pattern
+- ❌ Missing NULL checks
+- ❌ Unbounded array access
+- ❌ Ignored return values
+
+## If safety_utils.h Available
+
+Use it: CHECK_NULL_PTR, SAFE_ARRAY_GET, IS_IN_RANGE, safe_malloc, safe_realloc, safe_free, safe_strncpy.

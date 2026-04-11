@@ -1,0 +1,32 @@
+---
+description: CI deploy verification - verify locally first, then commit/push/deploy, iterate until successful
+alwaysApply: true
+---
+
+# CI Deploy Verification
+
+Compiled from C2DS-brood, C2DS-bootstrap, GGG-esp32c3-controller, c2ds_mobile_provisioning_app AGENTS.md.
+
+## Mandatory Rule
+
+**All changes must be built and validated locally before committing.**
+
+- Development proceeds by building locally, fixing issues, and rebuilding until the local build succeeds.
+- Only then may changes be committed and pushed.
+- GitHub CI is used strictly to **verify** a locally successful build, not as an iteration tool.
+
+## Deploy Workflow
+
+For repos that have a CI process: verify locally (build, tests) before commit. When changes are complete and
+local verification passes, commit, push, and deploy. Verify the deploy worked. If not, fix issues and redeploy.
+Iterate the fix-redeploy loop until successful.
+
+## If CI Fails
+
+1. Diagnose the failure
+2. Fix locally
+3. Rebuild to success
+4. Recommit and push
+5. Repeat until a green CI run is achieved
+
+**A green CI run is required for work to be considered complete.**

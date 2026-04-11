@@ -6,7 +6,7 @@ Home for all Suigetsukan AWS Lambda functions. Consolidated from individual repo
 
 ## Overview
 
-This repo contains five Lambdas that power the Suigetsukan curriculum platform: **billing**, **Cognito user management**, **DynamoDB backup**, and **video-to-curriculum indexing** (file-name-decipher). Each Lambda lives under `lambdas/<name>/` with `app.py`, `config.json`, and (where needed) `requirements.txt`. Shared code is in `common/` and is bundled into each Lambda at deploy time.
+This repo contains five Lambdas that power the Suigetsukan curriculum platform: **billing**, **Cognito user management**, **Cognito backup**, and **video-to-curriculum indexing** (file-name-decipher). **DynamoDB backup** is handled by **AWS Backup** in us-west-1 (weekly, 1-year retention); see [scripts/setup_aws_backup_dynamodb.py](scripts/setup_aws_backup_dynamodb.py) and [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md). Each Lambda lives under `lambdas/<name>/` with `app.py`, `config.json`, and (where needed) `requirements.txt`. Shared code is in `common/` and is bundled into each Lambda at deploy time.
 
 ---
 
@@ -71,23 +71,34 @@ This repo contains five Lambdas that power the Suigetsukan curriculum platform: 
 
 ---
 
-### ddb-backup
+### DynamoDB backup (AWS Backup)
 
-**Purpose:** Creates **on-demand DynamoDB backups** for all tables in the Lambda’s region. Backups are named with a timestamp and a 90-day retention label (e.g. `Suigetsukan-<TableName>-<timestamp>-Project_Retention_90d`).
+**DynamoDB** is backed up by **AWS Backup**, not a Lambda. **All** DynamoDB tables in **us-west-1** are included (wildcard `table/*`; new tables are included automatically) on a **weekly** schedule with **1-year retention** (automatic prune). Either run the one-time setup script or deploy the CloudFormation template; use profile **tennis@suigetsukan** and ensure DynamoDB is opted in for AWS Backup in that region.
 
-**Invocation:** EventBridge schedule (default: **every 7 days**). Can also be invoked manually.
+- **Script:** [scripts/setup_aws_backup_dynamodb.py](scripts/setup_aws_backup_dynamodb.py)
+- **CloudFormation (IaC):** [infra/aws-backup-dynamodb.yaml](infra/aws-backup-dynamodb.yaml) — `aws cloudformation deploy --template-file infra/aws-backup-dynamodb.yaml --stack-name suigetsukan-ddb-backup --capabilities CAPABILITY_NAMED_IAM --region us-west-1 --profile tennis@suigetsukan`
 
-**Behavior:** Lists all DynamoDB tables in `AWS_REGION`, calls `create_backup` for each, and returns a summary. Raises if any single backup fails.
+See [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md).
 
-**Key env:** `AWS_REGION`.
+---
 
-| Config        | Value                    |
-|---------------|--------------------------|
-| Function name | `suigetsukan-ddb-backup` |
-| Handler       | `app.lambda_handler`     |
-| Runtime       | Python 3.12             |
-| Timeout       | 300 s                    |
-| Event source  | EventBridge `rate(7 days)` |
+### cognito-backup
+
+**Purpose:** Exports **Cognito user pool** users, groups, and pool metadata to S3 on a schedule. No passwords or secrets are stored; restore requires users to reset password or use invite flow.
+
+**Invocation:** EventBridge schedule (**daily** at 3 AM UTC, `cron(0 3 * * ? *)`). Can also be invoked manually.
+
+**Behavior:** Lists all user pools in the region, then for each pool lists all users (with pagination) and each user’s groups, fetches pool metadata, compresses with gzip, and uploads to `s3://{bucket}/backups/YYYY/MM/DD/cognito-users-{pool_id}-{timestamp}.json.gz`. After upload, the backup is **validated** (re-download, decompress, structure and count checks); only then is the manifest at `backups/latest/manifest.json` updated and success returned. Publishes CloudWatch metrics (namespace `CognitoBackup`: TotalUsers, ExecutionDuration). Optional SNS notification on failure. **Retention:** Use **S3 lifecycle** on the backup bucket (prefix `backups/`, expire after 365 days). No pruning script (see [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md)).
+
+**Key env:** `AWS_REGION`, `AWS_S3_BACKUP_BUCKET` (required); optional `SNS_SUPPORT_TOPIC_ARN`. The deploy script never sets a single pool ID, so cognito-backup **always** backs up **all** Cognito user pools in the account in the configured region.
+
+| Config        | Value                          |
+|---------------|---------------------------------|
+| Function name | `suigetsukan-cognito-backup`   |
+| Handler       | `app.lambda_handler`           |
+| Runtime       | Python 3.12                    |
+| Timeout       | 300 s                          |
+| Event source  | EventBridge `cron(0 3 * * ? *)` (daily 3 AM UTC) |
 
 ---
 
@@ -121,8 +132,10 @@ File naming rules and patterns are documented in [docs/FILE_NAMING_CONVENTIONS.m
 | billing-rest-api         | API Gateway    | Cost Explorer billing/forecast API |
 | cognito-post-confirmation| Cognito        | Post-confirmation: unapproved + email admins |
 | cognito-rest-api         | API Gateway    | Admin: approve, promote, deny, delete users |
-| ddb-backup               | EventBridge    | On-demand DynamoDB backups (e.g. weekly) |
+| cognito-backup           | EventBridge    | Export Cognito users/groups to S3 (daily); validate backup, manifest, metrics |
 | file-name-decipher       | SNS            | Map video URLs → curriculum DynamoDB tables |
+
+DynamoDB backup is handled by **AWS Backup** (us-west-1, weekly, 1-year retention); see setup script and docs.
 
 ---
 
@@ -175,7 +188,20 @@ pytest tests/ -v
 
 ## Testing
 
+To run all tests: `./scripts/run_tests.sh` (or `pytest tests/ -v`).
+
 Tests run on push and pull request via GitHub Actions. **Deploy only proceeds if all lint, type, security, and test checks pass.**
+
+### Test then push
+
+Verify locally, then push (per CI-deploy-verify):
+
+1. **Run tests:** `./scripts/run_tests.sh` (from repo root; use `.venv` or install deps first).
+2. **Commit** if you have uncommitted changes (e.g. `feat: …` for a feature).
+3. **Pull with rebase** if remote is ahead: `git pull --rebase`.
+4. **Push:** `git push` (or `git push origin main`).
+
+Convenience: after committing, run `./scripts/test_then_push.sh` to run tests and, if they pass, pull with rebase and push. The script does not run `git add` or `git commit`.
 
 ---
 

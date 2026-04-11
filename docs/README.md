@@ -4,6 +4,15 @@
 
 This repository consolidates all AWS Lambda functions for the Suigetsukan organization.
 
+## URL convention
+
+Use the curriculum site base URL **without** a trailing slash or path after the domain:
+
+- **Correct:** `https://suigetsukan-curriculum.org`
+- **Wrong:** `https://suigetsukan-curriculum.org/` or `https://suigetsukan-curriculum.org/anything`
+
+When adding config, docs, or code that references the site, use the correct form. (Synthetics/canary and other services outside this repo should use the same convention.)
+
 ## Migration
 
 See `scripts/migrate_lambda_repos.sh` for listing, cloning, and migrating individual lambda repos.

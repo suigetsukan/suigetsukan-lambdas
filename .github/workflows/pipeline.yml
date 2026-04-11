@@ -1,67 +1,11 @@
-name: Deploy Lambdas (Smart + Validated)
+# Single CI pipeline: lint, test, validate config; on push to main, detect changes and deploy Lambdas.
+name: Pipeline
 
 on:
   push:
-    branches: [main]
+  pull_request:
 
 jobs:
-  detect-changes:
-    runs-on: ubuntu-latest
-    outputs:
-      changed_lambdas: ${{ steps.extract.outputs.changed_lambdas }}
-      deploy_all: ${{ steps.flags.outputs.deploy_all }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Filter changed paths
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          list-files: shell
-          base: ${{ github.ref_name }}
-          filters: |
-            lambdas:
-              - 'lambdas/**'
-            common:
-              - 'common/**'
-            layers:
-              - 'layers/**'
-            critical:
-              - '.github/schemas/lambda-config.schema.json'
-              - '.github/scripts/deploy_lambdas.py'
-              - '.github/scripts/extract_changed_lambdas.py'
-              - '.github/scripts/set_flags.py'
-              - '.github/scripts/validate_lambda_configs.py'
-              - '.github/workflows/deploy.yml'
-
-      - name: Extract changed Lambda names
-        id: extract
-        env:
-          CHANGED_FILES: ${{ steps.filter.outputs.lambdas_files }}
-        run: python .github/scripts/extract_changed_lambdas.py >> $GITHUB_OUTPUT
-
-      - name: Check commit message for deploy_all
-        id: commit_check
-        run: |
-          msg="${{ github.event.head_commit.message || '' }}"
-          if echo "$msg" | grep -iq "deploy_all"; then
-            echo "deploy_all_commit=true" >> $GITHUB_OUTPUT
-          else
-            echo "deploy_all_commit=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set flags
-        id: flags
-        env:
-          COMMON_FILES: ${{ steps.filter.outputs.common_files }}
-          LAYERS_FILES: ${{ steps.filter.outputs.layers_files }}
-          CRITICAL_FILES: ${{ steps.filter.outputs.critical_files }}
-          DEPLOY_ALL_COMMIT: ${{ steps.commit_check.outputs.deploy_all_commit }}
-        run: python .github/scripts/set_flags.py >> $GITHUB_OUTPUT
-
   lint-and-test:
     runs-on: ubuntu-latest
     steps:
@@ -94,7 +38,6 @@ jobs:
         run: pytest tests/ -v
 
   validate-config:
-    needs: detect-changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -111,7 +54,76 @@ jobs:
       - name: Validate
         run: python .github/scripts/validate_lambda_configs.py
 
+  detect-changes:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      changed_lambdas: ${{ steps.extract.outputs.changed_lambdas }}
+      deploy_all: ${{ steps.flags.outputs.deploy_all }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set base ref for change detection
+        id: base_ref
+        run: |
+          if [ -z "${{ github.event.before }}" ] || [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            echo "base=$(git rev-parse HEAD^ 2>/dev/null || echo HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "base=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          list-files: shell
+          base: ${{ steps.base_ref.outputs.base }}
+          filters: |
+            lambdas:
+              - 'lambdas/**'
+            common:
+              - 'common/**'
+            layers:
+              - 'layers/**'
+            critical:
+              - '.github/schemas/lambda-config.schema.json'
+              - '.github/scripts/deploy_lambdas.py'
+              - '.github/scripts/deploy_roles.py'
+              - '.github/scripts/extract_changed_lambdas.py'
+              - '.github/scripts/set_flags.py'
+              - '.github/scripts/validate_lambda_configs.py'
+              - '.github/workflows/pipeline.yml'
+
+      - name: Extract changed Lambda names
+        id: extract
+        env:
+          CHANGED_FILES: ${{ steps.filter.outputs.lambdas_files }}
+        run: python .github/scripts/extract_changed_lambdas.py >> $GITHUB_OUTPUT
+
+      - name: Check commit message for deploy_all
+        id: commit_check
+        run: |
+          msg="${{ github.event.head_commit.message || '' }}"
+          if echo "$msg" | grep -iq "deploy_all"; then
+            echo "deploy_all_commit=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_all_commit=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set flags
+        id: flags
+        env:
+          COMMON_FILES: ${{ steps.filter.outputs.common_files }}
+          LAYERS_FILES: ${{ steps.filter.outputs.layers_files }}
+          CRITICAL_FILES: ${{ steps.filter.outputs.critical_files }}
+          DEPLOY_ALL_COMMIT: ${{ steps.commit_check.outputs.deploy_all_commit }}
+        run: python .github/scripts/set_flags.py >> $GITHUB_OUTPUT
+
   deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [ detect-changes, validate-config, lint-and-test ]
     runs-on: ubuntu-latest
     environment: prod
@@ -155,13 +167,15 @@ jobs:
           DEPLOY_ALL: ${{ needs.detect-changes.outputs.deploy_all }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-          # Lambda-specific env vars (from config.json; use same names as secrets)
           AWS_SES_SOURCE_EMAIL: ${{ secrets.AWS_SES_SOURCE_EMAIL }}
           AWS_COGNITO_USER_POOL_ID: ${{ secrets.AWS_COGNITO_USER_POOL_ID }}
+          AWS_S3_BACKUP_BUCKET: ${{ secrets.AWS_S3_BACKUP_BUCKET }}
+          SNS_SUPPORT_TOPIC_ARN: ${{ secrets.SNS_SUPPORT_TOPIC_ARN }}
           AWS_DDB_AIKIDO_TABLE_NAME: ${{ secrets.AWS_DDB_AIKIDO_TABLE_NAME }}
           AWS_DDB_BATTODO_TABLE_NAME: ${{ secrets.AWS_DDB_BATTODO_TABLE_NAME }}
           AWS_DDB_DANZAN_RYU_TABLE_NAME: ${{ secrets.AWS_DDB_DANZAN_RYU_TABLE_NAME }}
           CORS_ALLOWED_ORIGIN: ${{ secrets.CORS_ALLOWED_ORIGIN }}
+          LOG_WATCHER_FUNCTION_NAME: ${{ secrets.LOG_WATCHER_FUNCTION_NAME }}
         run: python .github/scripts/deploy_lambdas.py
 
       - name: Setup Lambda Triggers

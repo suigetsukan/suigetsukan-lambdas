@@ -67,3 +67,24 @@ def test_lambda_handler_handles_empty_results_by_time():
     body = json.loads(response["body"])
     assert body["this_month"] == 0.0
     assert body["last_month"] == 0.0
+
+
+def test_set_leading_zero():
+    """set_leading_zero pads single digit, leaves two digits unchanged."""
+    with patch.dict("os.environ", {"AWS_REGION": "us-west-1"}, clear=False):
+        app = _load_billing_app()
+    assert app.set_leading_zero(5) == "05"
+    assert app.set_leading_zero(9) == "09"
+    assert app.set_leading_zero(10) == "10"
+    assert app.set_leading_zero(0) == "00"
+
+
+def test_lambda_handler_missing_authorizer_returns_401():
+    """When requestContext.authorizer is missing (non-OPTIONS), handler returns 401."""
+    with patch.dict("os.environ", {"AWS_REGION": "us-west-1"}, clear=False):
+        app = _load_billing_app()
+    event = {"httpMethod": "GET"}
+    response = app.lambda_handler(event, MagicMock())
+    assert response["statusCode"] == 401
+    body = json.loads(response["body"])
+    assert "Unauthorized" in body["error"]

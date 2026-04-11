@@ -1,0 +1,44 @@
+---
+description: ESP-IDF specific - Component Manager for shared libs, managed_components, idf.py, Kconfig, BLE security
+globs: "**/*.c,**/*.h"
+alwaysApply: false
+---
+
+# ESP-IDF Project Boundaries
+
+Applies when editing C sources in ESP-IDF projects. Compiled from C2DS-*, GGG-*, ELSL-* AGENTS.md.
+
+## DO NOT MODIFY
+
+**Never edit files in these directories:**
+
+- `managed_components/` - External dependencies (ESP-IDF Component Manager). Changes overwritten on next build.
+
+## Prefer Component Manager for Shared Libraries
+
+**Use ESP-IDF Component Manager whenever possible to share libraries** across projects.
+
+- Add dependencies via `idf_component.yml` (registry or Git URL) instead of copying code or vendoring.
+- Publish shared code as components so other projects can depend on them via the registry or `idf_component.yml`.
+- Prefer pulling from the component registry or a known component repo over in-tree or manual copies.
+
+## Managed Component Changes
+
+If changes are needed in `managed_components/svw__gecl-app-common` (or similar):
+
+1. DO NOT edit files directly
+2. Create a patch file or diff
+3. Apply changes in the upstream repository
+4. Update version in `idf_component.yml` after fix is released
+
+## Build and Tools
+
+- Use `idf.py` for ESP-IDF builds
+- Use `rg` (ripgrep) for searching
+
+## Security (ESP-IDF)
+
+- Use Kconfig with empty defaults for sensitive configuration
+- Use encryption for BLE credential transfer
+- Validate all certificates before use
+- Generate secure random numbers for cryptographic operations

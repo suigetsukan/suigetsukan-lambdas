@@ -1,0 +1,26 @@
+{
+  "function_name_suffix": "log-watcher-enroller",
+  "function_name": "suigetsukan-log-watcher-enroller",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 300,
+  "memory_size": 256,
+  "role_name": "suigetsukan-log-watcher-enroller-role",
+  "env_vars": {
+    "LOG_WATCHER_FUNCTION_NAME": "placeholder",
+    "LOG_GROUP_INCLUDE_PREFIXES": "placeholder",
+    "LOG_GROUP_EXCLUDE_PATTERNS": "placeholder"
+  },
+  "optional_env_vars": ["LOG_GROUP_INCLUDE_PREFIXES", "LOG_GROUP_EXCLUDE_PATTERNS"],
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"],
+  "event_sources": [
+    {
+      "type": "eventbridge",
+      "arn": "default",
+      "schedule_expression": "rate(1 hour)",
+      "rule_name": "suigetsukan-log-watcher-enroller-Rule"
+    }
+  ]
+}
