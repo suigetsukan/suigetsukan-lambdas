@@ -1,0 +1,32 @@
+{
+  "function_name_suffix": "analytics-report",
+  "function_name": "suigetsukan-analytics-report",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 300,
+  "memory_size": 256,
+  "env_vars": {
+    "AWS_REGION": "placeholder",
+    "AWS_PINPOINT_APP_ID": "placeholder",
+    "AWS_PINPOINT_REGION": "placeholder",
+    "AWS_SNS_ANALYTICS_TOPIC_ARN": "placeholder"
+  },
+  "layers": [],
+  "tags": {
+    "Project": "suigetsukan-curriculum",
+    "Environment": "prod"
+  },
+  "exclude_files": [
+    "*.pyc",
+    "__pycache__/*",
+    "tests/**"
+  ],
+  "event_sources": [
+    {
+      "type": "eventbridge",
+      "arn": "default",
+      "schedule_expression": "cron(0 1 ? * MON *)",
+      "rule_name": "suigetsukan-analytics-report-Schedule"
+    }
+  ]
+}
