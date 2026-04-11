@@ -176,6 +176,9 @@ jobs:
           AWS_DDB_DANZAN_RYU_TABLE_NAME: ${{ secrets.AWS_DDB_DANZAN_RYU_TABLE_NAME }}
           CORS_ALLOWED_ORIGIN: ${{ secrets.CORS_ALLOWED_ORIGIN }}
           LOG_WATCHER_FUNCTION_NAME: ${{ secrets.LOG_WATCHER_FUNCTION_NAME }}
+          AWS_PINPOINT_APP_ID: ${{ secrets.AWS_PINPOINT_APP_ID }}
+          AWS_PINPOINT_REGION: ${{ secrets.AWS_PINPOINT_REGION }}
+          AWS_SNS_ANALYTICS_TOPIC_ARN: ${{ secrets.AWS_SNS_ANALYTICS_TOPIC_ARN }}
         run: python .github/scripts/deploy_lambdas.py
 
       - name: Setup Lambda Triggers
