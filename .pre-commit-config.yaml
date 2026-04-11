@@ -29,5 +29,5 @@ repos:
         name: pytest
         entry: pytest tests/ -v --tb=short
         language: python
-        additional_dependencies: [pytest, boto3]
+        additional_dependencies: [pytest, boto3, jsonschema]
         pass_filenames: false
