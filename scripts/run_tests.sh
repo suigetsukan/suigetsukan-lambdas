@@ -16,10 +16,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-if [ -f ".venv/bin/activate" ]; then
-  # shellcheck source=/dev/null
-  source .venv/bin/activate
+# Auto-create a per-checkout .venv if missing (so this works in fresh git
+# worktrees, which share .git but not workspace files). Prefer python3 with
+# python fallback so we don't depend on a `python` symlink (macOS Homebrew).
+if [ ! -f ".venv/bin/activate" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    py_boot=python3
+  elif command -v python >/dev/null 2>&1; then
+    py_boot=python
+  else
+    echo "Error: neither python3 nor python is on PATH; cannot create .venv." >&2
+    exit 1
+  fi
+  echo "No .venv found at $REPO_ROOT/.venv — creating one with $py_boot -m venv..."
+  "$py_boot" -m venv .venv
+  PIP_DISABLE_PIP_VERSION_CHECK=1 .venv/bin/python -m pip install -q -r requirements-dev.txt boto3
 fi
+# shellcheck source=/dev/null
+source .venv/bin/activate
 
 echo "=== Ruff (lint) ==="
 ruff check . --fix
