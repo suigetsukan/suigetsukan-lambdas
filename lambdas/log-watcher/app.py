@@ -199,11 +199,16 @@ def _is_warning_only(msg: str) -> bool:
 
 
 _INFO_DEBUG_PREFIX = re.compile(r"^\[(?:INFO|DEBUG)\]\s")
+_JSON_LEVEL_FIELD = re.compile(r'"level"\s*:\s*"(?P<lvl>[A-Za-z]+)"')
+_LOW_SEVERITY_LEVELS = frozenset({"info", "debug", "trace", "notice"})
 
 
 def _is_info_or_debug(msg: str) -> bool:
-    """True if message has an INFO or DEBUG log-level prefix from the Lambda runtime."""
-    return bool(_INFO_DEBUG_PREFIX.match(msg))
+    """True if message is info/debug-level via Lambda-runtime prefix or JSON `level` field."""
+    if _INFO_DEBUG_PREFIX.match(msg):
+        return True
+    match = _JSON_LEVEL_FIELD.search(msg)
+    return bool(match and match.group("lvl").lower() in _LOW_SEVERITY_LEVELS)
 
 
 def _severity_hint(msg: str) -> str:

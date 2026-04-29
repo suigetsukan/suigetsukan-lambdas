@@ -237,6 +237,75 @@ def test_is_info_or_debug(load_lambda):
     assert mod._is_info_or_debug("plain message without prefix") is False
 
 
+def test_is_info_or_debug_json_level(load_lambda):
+    """JSON-formatted logs with low-severity `level` fields are recognized."""
+    mod = load_lambda("log-watcher")
+    # pylint: disable=protected-access
+    assert (
+        mod._is_info_or_debug(
+            '{"level":"info","logger":"telemetryAPI.Listener",'
+            '"msg":"HTTP Server closed:","error":"http: Server closed"}'
+        )
+        is True
+    )
+    assert mod._is_info_or_debug('{"level":"debug","msg":"warm-up"}') is True
+    assert mod._is_info_or_debug('{"level":"INFO","msg":"x"}') is True
+    assert mod._is_info_or_debug('{"level":"trace","msg":"x"}') is True
+    assert mod._is_info_or_debug('{"level":"notice","msg":"x"}') is True
+    assert mod._is_info_or_debug('{"level":"error","msg":"db connection refused"}') is False
+    assert mod._is_info_or_debug('{"level":"warning","msg":"deprecated API"}') is False
+    # Must key off the actual `"level"` field, not any `"info"` substring.
+    assert mod._is_info_or_debug('{"foo":"info","level":"error"}') is False
+
+
+@patch.dict(
+    "os.environ",
+    {
+        "SNS_SUPPORT_TOPIC_ARN": "arn:aws:sns:us-east-2:123456789012:support-topic",
+        "AWS_DDB_DEDUP_TABLE_NAME": "suigetsukan-log-watcher-dedup",
+        "ENV": "test",
+    },
+    clear=False,
+)
+@patch("boto3.client")
+def test_telemetry_api_listener_json_info_ignored(mock_boto_client, load_lambda):
+    """JSON-formatted info-level lines (e.g. Lambda Telemetry API extension) are ignored."""
+    mock_sns = MagicMock()
+    mock_ddb = MagicMock()
+    mock_ddb.get_item.return_value = {}
+
+    def client(svc, **_kw):
+        if svc == "sns":
+            return mock_sns
+        if svc == "dynamodb":
+            return mock_ddb
+        return MagicMock()
+
+    mock_boto_client.side_effect = client
+
+    event = _make_cloudwatch_event(
+        "/aws/lambda/mother-hen-api-HumanDoorsShadowSyncLambda-abc",
+        "2026/04/29/[$LATEST]abc123",
+        [
+            {
+                "message": '{"level":"info","ts":1777503863.4976969,'
+                '"logger":"telemetryAPI.Listener",'
+                '"msg":"HTTP Server closed:","error":"http: Server closed"}'
+            }
+        ],
+    )
+
+    mod = load_lambda("log-watcher")
+    ctx = MagicMock()
+    ctx.aws_request_id = "test-inv-id"
+    result = mod.lambda_handler(event, ctx)
+
+    assert result["ignored"] == 1
+    assert result["matches"] == 0
+    assert result["sms_published"] == 0
+    mock_sns.publish.assert_not_called()
+
+
 @patch.dict(
     "os.environ",
     {
