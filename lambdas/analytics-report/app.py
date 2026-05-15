@@ -1,15 +1,17 @@
 """
 Weekly analytics report for the Suigetsukan curriculum site.
 
-Queries AWS Pinpoint for site-utilization metrics covering the past
-seven days, compares them to the prior week, and publishes a
-plain-text summary to an SNS topic for email delivery.
+Queries CloudWatch RUM custom-event logs via CloudWatch Logs Insights
+for site-utilization metrics covering the past seven days, compares
+them to the prior week, and publishes a plain-text summary to an SNS
+topic for email delivery.
 
 Trigger: EventBridge schedule (weekly, Sunday evening US-Pacific).
 """
 
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -19,11 +21,6 @@ from common.constants import DEFAULT_REGION
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-# Pinpoint KPI name templates
-_EVENT_RECORD_KPI = "events.{}.record-count"
-_EVENT_ENDPOINT_KPI = "events.{}.endpoint-count"
-_SESSION_KPI = "sessions.count"
 
 # Custom events instrumented on the curriculum site (analytics.js)
 TRACKED_EVENTS = (
@@ -39,15 +36,24 @@ TRACKED_EVENTS = (
 # A week-over-week change above this threshold is flagged
 SIGNIFICANT_CHANGE_PCT = 20
 
+# Logs Insights polling
+_QUERY_POLL_INTERVAL_SECS = 2
+_QUERY_TIMEOUT_SECS = 60
+
+# RUM stores custom events as one log record per event with this top-level
+# event_type. The user-defined event name (PageView, VideoPlay, ...) lives
+# inside the event_details JSON blob.
+_RUM_CUSTOM_EVENT_TYPE = "com.amazon.rum.custom_event"
+
 
 def lambda_handler(_event, _context):
     """Generate and publish the weekly analytics report."""
-    pinpoint_app_id = os.environ["AWS_PINPOINT_APP_ID"]
-    pinpoint_region = os.environ.get("AWS_PINPOINT_REGION", "us-west-2")
+    log_group = os.environ["RUM_LOG_GROUP_NAME"]
+    rum_region = os.environ.get("RUM_LOG_REGION", DEFAULT_REGION)
     sns_topic_arn = os.environ["AWS_SNS_ANALYTICS_TOPIC_ARN"]
     region = os.environ.get("AWS_REGION", DEFAULT_REGION)
 
-    pinpoint = boto3.client("pinpoint", region_name=pinpoint_region)
+    logs = boto3.client("logs", region_name=rum_region)
     sns = boto3.client("sns", region_name=region)
 
     today = datetime.now(timezone.utc).date()  # noqa: UP017
@@ -56,18 +62,8 @@ def lambda_handler(_event, _context):
     prev_week_end = this_week_start
     prev_week_start = prev_week_end - timedelta(days=7)
 
-    this_week = _gather_metrics(
-        pinpoint,
-        pinpoint_app_id,
-        this_week_start,
-        this_week_end,
-    )
-    prev_week = _gather_metrics(
-        pinpoint,
-        pinpoint_app_id,
-        prev_week_start,
-        prev_week_end,
-    )
+    this_week = _gather_metrics(logs, log_group, this_week_start, this_week_end)
+    prev_week = _gather_metrics(logs, log_group, prev_week_start, prev_week_end)
 
     date_label = (
         f"{this_week_start.strftime('%b %d')} - "
@@ -87,83 +83,147 @@ def lambda_handler(_event, _context):
 
 
 # -------------------------------------------------------------------
-#  Data collection
+#  Data collection (CloudWatch Logs Insights against RUM log group)
 # -------------------------------------------------------------------
 
 
-def _gather_metrics(client, app_id, start_date, end_date):
-    """Query Pinpoint for all tracked KPIs over the given date range."""
-    metrics = {}
+def _gather_metrics(logs_client, log_group, start_date, end_date):
+    """Aggregate RUM events for the given date range into the report dict."""
+    start_ts = _to_epoch(start_date)
+    end_ts = _to_epoch(end_date)
 
-    metrics["sessions"] = _query_kpi(
-        client,
-        app_id,
-        _SESSION_KPI,
-        start_date,
-        end_date,
+    metrics = dict.fromkeys(TRACKED_EVENTS)
+    metrics["sessions"] = None
+    metrics["unique_video_viewers"] = None
+
+    event_counts = _query_event_counts(logs_client, log_group, start_ts, end_ts)
+    if event_counts is not None:
+        for event_name in TRACKED_EVENTS:
+            metrics[event_name] = event_counts.get(event_name, 0)
+
+    metrics["sessions"] = _query_distinct_count(
+        logs_client,
+        log_group,
+        start_ts,
+        end_ts,
+        distinct_field="metadata.session_id",
     )
-
-    for event_name in TRACKED_EVENTS:
-        kpi = _EVENT_RECORD_KPI.format(event_name)
-        metrics[event_name] = _query_kpi(
-            client,
-            app_id,
-            kpi,
-            start_date,
-            end_date,
-        )
-
-    metrics["unique_video_viewers"] = _query_kpi(
-        client,
-        app_id,
-        _EVENT_ENDPOINT_KPI.format("VideoPlay"),
-        start_date,
-        end_date,
+    metrics["unique_video_viewers"] = _query_distinct_count(
+        logs_client,
+        log_group,
+        start_ts,
+        end_ts,
+        distinct_field="user_details.user_id",
+        event_name_filter="VideoPlay",
     )
-
     return metrics
 
 
-def _query_kpi(client, app_id, kpi_name, start_date, end_date):
-    """Return the aggregate value for a Pinpoint KPI, or None on error."""
+def _query_event_counts(logs_client, log_group, start_ts, end_ts):
+    """Return ``{event_name: count}`` for all custom events in the window."""
+    query = (
+        f"fields event_details.event_type as event_name\n"
+        f'| filter event_type = "{_RUM_CUSTOM_EVENT_TYPE}"\n'
+        f"| stats count() as event_count by event_name\n"
+        f"| limit 100"
+    )
+    rows = _run_query(logs_client, log_group, start_ts, end_ts, query)
+    if rows is None:
+        return None
+    counts = {}
+    for row in rows:
+        cells = {cell["field"]: cell["value"] for cell in row}
+        name = cells.get("event_name")
+        if not name:
+            continue
+        counts[name] = _safe_int(cells.get("event_count"))
+    return counts
+
+
+def _query_distinct_count(
+    logs_client,
+    log_group,
+    start_ts,
+    end_ts,
+    distinct_field,
+    event_name_filter=None,
+):
+    """Return count_distinct(<field>) over the window, or None on error."""
+    parts = [f'filter event_type = "{_RUM_CUSTOM_EVENT_TYPE}"']
+    if event_name_filter is not None:
+        parts.append(f'| filter event_details.event_type = "{event_name_filter}"')
+    parts.append(f"| stats count_distinct({distinct_field}) as n")
+    query = "\n".join(parts)
+
+    rows = _run_query(logs_client, log_group, start_ts, end_ts, query)
+    if not rows:
+        return None
+    cells = {cell["field"]: cell["value"] for cell in rows[0]}
+    return _safe_int(cells.get("n"))
+
+
+def _run_query(logs_client, log_group, start_ts, end_ts, query_string):
+    """Submit a Logs Insights query and wait for results."""
     try:
-        start_dt = datetime.combine(
-            start_date,
-            datetime.min.time(),
-            tzinfo=timezone.utc,  # noqa: UP017
+        start_resp = logs_client.start_query(
+            logGroupName=log_group,
+            startTime=start_ts,
+            endTime=end_ts,
+            queryString=query_string,
         )
-        end_dt = datetime.combine(
-            end_date,
-            datetime.min.time(),
-            tzinfo=timezone.utc,  # noqa: UP017
-        )
-        resp = client.get_application_date_range_kpi(
-            ApplicationId=app_id,
-            KpiName=kpi_name,
-            StartTime=start_dt,
-            EndTime=end_dt,
-        )
-        rows = resp.get("ApplicationDateRangeKpiResponse", {}).get("KpiResult", {}).get("Rows", [])
-        return _sum_kpi_rows(rows)
     except ClientError as err:
         logger.warning(
-            "KPI query failed for %s: %s",
-            kpi_name,
+            "Logs Insights start_query failed: %s",
             err.response["Error"]["Message"],
         )
         return None
 
+    query_id = start_resp["queryId"]
+    deadline = time.monotonic() + _QUERY_TIMEOUT_SECS
+    while time.monotonic() < deadline:
+        try:
+            result = logs_client.get_query_results(queryId=query_id)
+        except ClientError as err:
+            logger.warning(
+                "Logs Insights get_query_results failed: %s",
+                err.response["Error"]["Message"],
+            )
+            return None
+        status = result.get("status")
+        if status == "Complete":
+            return result.get("results", [])
+        if status in ("Failed", "Cancelled", "Timeout"):
+            logger.warning("Logs Insights query ended with status %s", status)
+            return None
+        time.sleep(_QUERY_POLL_INTERVAL_SECS)
 
-def _sum_kpi_rows(rows):
-    """Sum numeric values across all Pinpoint KPI result rows."""
-    total = 0
-    for row in rows:
-        for value in row.get("Values", []):
-            try:
-                total += int(float(value.get("Value", "0")))
-            except (ValueError, TypeError):
-                continue
-    return total
+    logger.warning("Logs Insights query exceeded %ss timeout", _QUERY_TIMEOUT_SECS)
+    try:
+        logs_client.stop_query(queryId=query_id)
+    except ClientError:
+        logger.debug("stop_query failed for %s", query_id)
+    return None
+
+
+def _to_epoch(date_obj):
+    """Convert a date (UTC midnight) to integer epoch seconds."""
+    return int(
+        datetime.combine(
+            date_obj,
+            datetime.min.time(),
+            tzinfo=timezone.utc,  # noqa: UP017
+        ).timestamp()
+    )
+
+
+def _safe_int(value):
+    """Parse a Logs Insights cell value to int; treat junk as 0."""
+    if value is None:
+        return 0
+    try:
+        return int(float(value))
+    except (ValueError, TypeError):
+        return 0
 
 
 # -------------------------------------------------------------------
@@ -251,7 +311,6 @@ def _append_sections(lines, metrics):
     lines.append("SECTION VIEWS")
     lines.append("-" * 40)
     lines.append(f"  Total: {_fmt(metrics.get('SectionView'))}")
-    lines.append("  (Per-art breakdown requires Pinpoint event streaming.)")
     lines.append("")
 
 

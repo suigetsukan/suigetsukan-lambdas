@@ -7,8 +7,8 @@
   "memory_size": 256,
   "env_vars": {
     "AWS_REGION": "placeholder",
-    "AWS_PINPOINT_APP_ID": "placeholder",
-    "AWS_PINPOINT_REGION": "placeholder",
+    "RUM_LOG_GROUP_NAME": "placeholder",
+    "RUM_LOG_REGION": "placeholder",
     "AWS_SNS_ANALYTICS_TOPIC_ARN": "placeholder"
   },
   "layers": [],
