@@ -481,6 +481,11 @@ def test_dashboard_filters_empty_lambda_and_table_names(mock_boto_client, load_l
                         raise AssertionError(
                             "Dashboard body must not contain empty dimension values"
                         )
+    # Every metric widget must declare a region or PutDashboard rejects
+    # the body with InvalidParameterInput.
+    for w in body.get("widgets", []):
+        if w.get("type") == "metric":
+            assert w.get("properties", {}).get("region"), f"metric widget missing region: {w}"
     assert call_kw["DashboardName"] == "MotherHen-Ops"
 
 

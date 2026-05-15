@@ -5,13 +5,18 @@ Extracted to keep app.py under 1000 lines.
 
 
 def build_dashboard_widgets(
-    config: dict, lambdas_list: list, ddb_tables: list, _sns_topic_names: list
+    config: dict,
+    region: str,
+    lambdas_list: list,
+    ddb_tables: list,
+    _sns_topic_names: list,
 ) -> list:
-    """Build CloudWatch dashboard body (widgets list)."""
+    """Build CloudWatch dashboard body (widgets list).
+
+    Every metric widget must declare `region` in its properties or
+    `PutDashboard` rejects the body with InvalidParameterInput.
+    """
     widgets = []
-    region = config.get("regions", "us-east-2")
-    if isinstance(region, list):
-        region = region[0] if region else "us-east-2"
     for i, fname in enumerate(lambdas_list[:12]):
         widgets.append(
             {
@@ -21,6 +26,7 @@ def build_dashboard_widgets(
                 "width": 4,
                 "height": 4,
                 "properties": {
+                    "region": region,
                     "title": f"Lambda {fname}",
                     "metrics": [
                         ["AWS/Lambda", "Errors", "FunctionName", fname],
@@ -40,6 +46,7 @@ def build_dashboard_widgets(
                 "width": 4,
                 "height": 4,
                 "properties": {
+                    "region": region,
                     "title": f"DynamoDB {tname}",
                     "metrics": [
                         ["AWS/DynamoDB", "ThrottledRequests", "TableName", tname],
@@ -59,6 +66,7 @@ def build_dashboard_widgets(
             "width": 12,
             "height": 6,
             "properties": {
+                "region": region,
                 "title": "CloudTrail Tripwires",
                 "metrics": [
                     [ns, "RootLogin"],
