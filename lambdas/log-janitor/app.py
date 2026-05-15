@@ -937,7 +937,7 @@ def _run_dashboard(region, config, mode, result):
     lambdas_list = _filter_valid_dashboard_names(_collect_critical_lambdas(lam, config))[:12]
     tables = _filter_valid_dashboard_names(_collect_tables_for_dashboard(ddb, config))[:6]
     topic_names = _collect_sns_names_for_dashboard(sns, config)
-    widgets = build_dashboard_widgets(config, lambdas_list, tables, topic_names)
+    widgets = build_dashboard_widgets(config, region, lambdas_list, tables, topic_names)
     dashboard_name = _sanitize_dashboard_name(config.get("dashboard_name", "MotherHen-Ops"))
     out = {"created": False, "error": None}
     if mode == "APPLY":
