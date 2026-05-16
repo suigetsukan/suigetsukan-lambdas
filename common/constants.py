@@ -30,6 +30,8 @@ CORS_METHODS_GET_POST_OPTIONS = "GET, POST, OPTIONS"
 COGNITO_GROUP_ADMIN = "admin"
 COGNITO_GROUP_APPROVED = "approved"
 COGNITO_GROUP_UNAPPROVED = "unapproved"
+COGNITO_GROUP_APPROVER = "approver"
+COGNITO_GROUP_CONTRIBUTOR = "contributor"
 COGNITO_TRIGGER_POST_CONFIRMATION = "PostConfirmation_ConfirmSignUp"
 
 # ---------------------------------------------------------------------------
