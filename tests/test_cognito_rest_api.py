@@ -44,8 +44,8 @@ def test_handler_options_returns_204():
         assert "Access-Control-Allow-Origin" in result["headers"]
 
 
-def test_handler_missing_authorizer_returns_401():
-    """Require API Gateway Cognito authorizer for non-OPTIONS requests."""
+def test_handler_missing_authorizer_returns_401_when_required():
+    """When REQUIRE_AUTHORIZER=true, reject requests without an authorizer."""
     with (
         patch.dict(
             "os.environ",
@@ -53,6 +53,7 @@ def test_handler_missing_authorizer_returns_401():
                 "AWS_REGION": "us-west-1",
                 "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
                 "AWS_SES_SOURCE_EMAIL": "test@example.com",
+                "REQUIRE_AUTHORIZER": "true",
             },
         ),
         patch("boto3.client"),
@@ -63,6 +64,46 @@ def test_handler_missing_authorizer_returns_401():
         assert result["statusCode"] == 401
         body = json.loads(result["body"])
         assert "Unauthorized" in body["error"]
+
+
+def test_handler_missing_authorizer_passes_when_check_disabled():
+    """Default REQUIRE_AUTHORIZER=off: missing authorizer is allowed through.
+
+    This matches the legacy Lambda's behavior on the live CognitoAPI,
+    which has no authorizer attached at the API Gateway level.
+    """
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+            clear=False,
+        ),
+        patch("boto3.client") as mock_boto,
+    ):
+        cognito_mock = MagicMock()
+        cognito_mock.list_users.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [],
+        }
+        cognito_mock.list_users_in_group.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [],
+        }
+        mock_boto.return_value = cognito_mock
+
+        app = _load_cognito_rest_app()
+        # Force-clear REQUIRE_AUTHORIZER in case the surrounding env has it set.
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+
+            os.environ.pop("REQUIRE_AUTHORIZER", None)
+            event = {"httpMethod": "GET", "path": "/list"}
+            result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 200
 
 
 def test_handler_missing_httpmethod_returns_400():
@@ -206,6 +247,65 @@ def test_handler_post_missing_required_fields_returns_400():
         assert "Missing required fields" in body["error"]
 
 
+def test_handler_get_list_includes_groups_per_user():
+    """Each approved user carries a `groups` field listing tracked group memberships."""
+
+    # The mock returns "alice" in both `approved` and `contributor`, "bob" in `approved` only.
+    def by_group(**kw):
+        group = kw.get("GroupName")
+        users = []
+        if group == "approved":
+            users = [
+                {
+                    "Username": "alice",
+                    "Attributes": [{"Name": "email", "Value": "alice@example.com"}],
+                },
+                {"Username": "bob", "Attributes": [{"Name": "email", "Value": "bob@example.com"}]},
+            ]
+        elif group == "contributor":
+            users = [
+                {
+                    "Username": "alice",
+                    "Attributes": [{"Name": "email", "Value": "alice@example.com"}],
+                },
+            ]
+        return {"ResponseMetadata": {"HTTPStatusCode": 200}, "Users": users}
+
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+        ),
+        patch("boto3.client") as mock_boto,
+    ):
+        cognito_mock = MagicMock()
+        cognito_mock.list_users_in_group.side_effect = by_group
+        cognito_mock.list_users.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [
+                {
+                    "Username": "alice",
+                    "Attributes": [{"Name": "email", "Value": "alice@example.com"}],
+                },
+                {"Username": "bob", "Attributes": [{"Name": "email", "Value": "bob@example.com"}]},
+            ],
+        }
+        mock_boto.return_value = cognito_mock
+
+        app = _load_cognito_rest_app()
+        event = {"httpMethod": "GET", "path": "/list", **AUTH_CONTEXT}
+        result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        approved_by_email = {u["email"]: u for u in body["approved"]}
+        assert approved_by_email["alice@example.com"]["groups"] == ["contributor"]
+        assert approved_by_email["bob@example.com"]["groups"] == []
+
+
 def test_handler_get_list_admin_returns_admin_emails():
     with (
         patch.dict(
@@ -299,6 +399,8 @@ def _post_body():
         ("/deny", "denied"),
         ("/close", "closed"),
         ("/delete", "deleted"),
+        ("/add_contributor", "contributor"),
+        ("/remove_contributor", "contributor"),
     ],
 )
 def test_handler_post_actions_return_200(path_suffix, expected_substring):

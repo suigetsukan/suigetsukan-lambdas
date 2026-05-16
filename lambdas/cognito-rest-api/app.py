@@ -13,6 +13,8 @@ from common.constants import (
     CHARSET_UTF8,
     COGNITO_GROUP_ADMIN,
     COGNITO_GROUP_APPROVED,
+    COGNITO_GROUP_APPROVER,
+    COGNITO_GROUP_CONTRIBUTOR,
     COGNITO_GROUP_UNAPPROVED,
     CORS_HEADERS_ALL,
     CORS_METHODS_GET_POST_OPTIONS,
@@ -22,6 +24,14 @@ from common.constants import (
     HTTP_NO_CONTENT,
     HTTP_OK,
     HTTP_UNAUTHORIZED,
+)
+
+# Groups whose membership is surfaced on each approved user in /list.
+# Order is alphabetical; the front-end treats this as a set.
+_TRACKED_GROUPS = (
+    COGNITO_GROUP_ADMIN,
+    COGNITO_GROUP_APPROVER,
+    COGNITO_GROUP_CONTRIBUTOR,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,7 +56,18 @@ def _error_response(status_code, message):
 
 
 def _require_authorizer(event):
-    """Require API Gateway Cognito authorizer; return 401 if missing."""
+    """Optionally require an API Gateway authorizer; off by default.
+
+    The CognitoAPI for the curriculum site does not have an authorizer
+    attached at the API Gateway level today — the front-end forwards a
+    Cognito JWT via a custom Authorization header but API Gateway does
+    not validate it. Defaulting this check to off keeps parity with the
+    legacy Lambda. Setting REQUIRE_AUTHORIZER=true makes the check
+    strict, which is the right posture once an API Gateway Cognito
+    authorizer is in place.
+    """
+    if os.environ.get("REQUIRE_AUTHORIZER", "false").lower() != "true":
+        return None
     if not event.get("requestContext", {}).get("authorizer"):
         return _error_response(
             HTTP_UNAUTHORIZED,
@@ -117,6 +138,16 @@ def _handle_post(event, client, user_pool_id):
         "/close": (close_handler, "CLOSED", "account closed by user request"),
         "/deny": (deny_handler, "DENIED", f"has been denied by {actor}"),
         "/delete": (delete_handler, "DELETED", f"has been deleted by {actor}"),
+        "/add_contributor": (
+            add_contributor_handler,
+            "CONTRIBUTOR ADDED",
+            f"added to the contributor group by {actor}",
+        ),
+        "/remove_contributor": (
+            remove_contributor_handler,
+            "CONTRIBUTOR REMOVED",
+            f"removed from the contributor group by {actor}",
+        ),
     }
     for suffix, (handler_fn, subject, msg) in post_handlers.items():
         if path.endswith(suffix):
@@ -295,12 +326,26 @@ def get_admin_users(client, user_pool_id):
     return compile_emails(response)
 
 
+def _membership_index(client, user_pool_id, group_names):
+    """Build {user_name: [group, ...]} for the supplied groups.
+
+    One ListUsersInGroup call per tracked group, then invert. Avoids the
+    N+1 of calling admin_list_groups_for_user once per user.
+    """
+    index: dict[str, list[str]] = {}
+    for group in group_names:
+        members = get_users_in_group(client, user_pool_id, group)
+        for member in members:
+            index.setdefault(member["user_name"], []).append(group)
+    return index
+
+
 def list_handler(client, user_pool_id):
     """
     List all Cognito users
     :param client: Cognito client
     :param user_pool_id: Cognito user pool id
-    :return: JSON object of users
+    :return: JSON object of users with their tracked-group memberships
     """
     all_users = get_all_users(client, user_pool_id)
     unapproved_users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_UNAPPROVED)
@@ -320,8 +365,13 @@ def list_handler(client, user_pool_id):
         len(other_users),
     )
 
+    membership = _membership_index(client, user_pool_id, _TRACKED_GROUPS)
+    enriched_approved = [
+        {**u, "groups": sorted(membership.get(u["user_name"], []))} for u in approved_users
+    ]
+
     body = {
-        "approved": sorted(approved_users, key=lambda x: x["email"]),
+        "approved": sorted(enriched_approved, key=lambda x: x["email"]),
         "unapproved": unapproved_users,
     }
     return body
@@ -382,6 +432,70 @@ def promote_handler(user_name, client, user_pool_id):
 
     if not body:
         raise RuntimeError("User not found. Could not promote.")
+
+    return body
+
+
+def add_contributor_handler(user_name, client, user_pool_id):
+    """Add an approved user to the contributor group.
+
+    Mirrors promote_handler: only users already in the approved group
+    are eligible. Idempotent at the Cognito level — re-adding a member
+    is a no-op upstream.
+    """
+    body = None
+    users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_APPROVED)
+    for user in users:
+        if user["user_name"] == user_name:
+            add_user_to_group(client, user_pool_id, user_name, COGNITO_GROUP_CONTRIBUTOR)
+            email = user["email"]
+            send_mail(
+                [email],
+                "Suigetsukan Contributor Access Granted",
+                (
+                    "You have been added to the Suigetsukan contributor group. "
+                    "You can now upload technique recordings at "
+                    "https://www.suigetsukan-curriculum.org/contribute."
+                ),
+            )
+            body = f"The user {email} has been added to the contributor group"
+            logger.info("Contributor-add email sent")
+            break
+
+    if not body:
+        raise RuntimeError("User not found. Could not add to contributor group.")
+
+    return body
+
+
+def remove_contributor_handler(user_name, client, user_pool_id):
+    """Remove a user from the contributor group.
+
+    Operates on the approved set (mirroring promote_handler's lookup);
+    a user who is no longer approved cannot be in the contributor
+    group anyway. The user is informed by email.
+    """
+    body = None
+    users = get_users_in_group(client, user_pool_id, COGNITO_GROUP_APPROVED)
+    for user in users:
+        if user["user_name"] == user_name:
+            remove_user_from_group(client, user_pool_id, user_name, COGNITO_GROUP_CONTRIBUTOR)
+            email = user["email"]
+            send_mail(
+                [email],
+                "Suigetsukan Contributor Access Removed",
+                (
+                    "Your access to the Suigetsukan contributor portal has been "
+                    "removed. If you believe this was a mistake, please contact "
+                    "Sensei Mike."
+                ),
+            )
+            body = f"The user {email} has been removed from the contributor group"
+            logger.info("Contributor-remove email sent")
+            break
+
+    if not body:
+        raise RuntimeError("User not found. Could not remove from contributor group.")
 
     return body
 
