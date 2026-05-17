@@ -44,6 +44,10 @@ DEFAULT_RUM_REGION = DEFAULT_REGION
 _RUM_CUSTOM_EVENT_TYPE = "com.amazon.rum.custom_event"
 _RUM_JS_ERROR_EVENT_TYPE = "com.amazon.rum.js_error_event"
 
+# CloudWatch period for Cognito sign-in aggregation; daily buckets summed
+# weekly on the Lambda side.
+SECONDS_PER_DAY = 86400
+
 # Logs Insights polling
 _QUERY_POLL_INTERVAL_SECS = 1
 _QUERY_TIMEOUT_SECS = 10
@@ -108,6 +112,22 @@ def _logs_client():
         region = os.environ.get("RUM_REGION", DEFAULT_RUM_REGION)
         _CLIENTS["logs"] = boto3.client("logs", region_name=region)
     return _CLIENTS["logs"]
+
+
+def _cognito_metrics_client():
+    """CloudWatch client targeting the region where Cognito metrics are published.
+
+    AWS/Cognito metrics live in the same region as the user pool. Default
+    to RUM_REGION since today they share us-west-1, but keep it
+    overridable via COGNITO_METRICS_REGION if the user pool moves.
+    """
+    if "cognito_metrics" not in _CLIENTS:
+        region = os.environ.get(
+            "COGNITO_METRICS_REGION",
+            os.environ.get("RUM_REGION", DEFAULT_RUM_REGION),
+        )
+        _CLIENTS["cognito_metrics"] = boto3.client("cloudwatch", region_name=region)
+    return _CLIENTS["cognito_metrics"]
 
 
 def _rum_app_monitor() -> str:
@@ -431,6 +451,63 @@ def _geography(days: int) -> dict:
     return {"data": {"countries": countries, "regions": regions}}
 
 
+def _cognito_weekly_sign_ins(days: int) -> dict:
+    """Return weekly SignInSuccesses totals for the user pool, plus the trailing average.
+
+    `days` is the lookup window; we floor it to whole weeks (>=1) so each
+    bucket is a full 7 days. Daily datapoints are fetched then summed
+    into weekly buckets on the Lambda side — simpler and less brittle
+    than asking CloudWatch for a 7-day Period.
+    """
+    user_pool_id = os.environ.get("AWS_COGNITO_USER_POOL_ID")
+    if not user_pool_id:
+        return {"data": None, "error": "AWS_COGNITO_USER_POOL_ID not configured"}
+
+    weeks = max(1, days // 7)
+    end = datetime.now(timezone.utc)  # noqa: UP017
+    start = end - timedelta(days=weeks * 7)
+
+    # SignInSuccesses is published per (UserPool, UserPoolClient). A
+    # Metrics Insights SELECT with SUM aggregates across UserPoolClient
+    # without us having to enumerate app clients ourselves.
+    resp = _cognito_metrics_client().get_metric_data(
+        MetricDataQueries=[
+            {
+                "Id": "signins",
+                # CloudWatch Metrics Insights, not SQL; user_pool_id sourced from Lambda env.
+                "Expression": (
+                    f"SELECT SUM(SignInSuccesses) "  # noqa: S608
+                    f'FROM SCHEMA("AWS/Cognito", UserPool, UserPoolClient) '
+                    f"WHERE UserPool = '{user_pool_id}'"
+                ),
+                "Period": SECONDS_PER_DAY,
+                "ReturnData": True,
+            }
+        ],
+        StartTime=start,
+        EndTime=end,
+        ScanBy="TimestampAscending",
+    )
+    results = resp.get("MetricDataResults", [])
+    points = results[0] if results else {"Timestamps": [], "Values": []}
+
+    buckets: list[float] = [0.0] * weeks
+    for ts, v in zip(points.get("Timestamps", []), points.get("Values", []), strict=False):
+        offset_days = (ts - start).days
+        idx = min(weeks - 1, max(0, offset_days // 7))
+        buckets[idx] += float(v)
+
+    series = [
+        {
+            "start": (start + timedelta(days=i * 7)).strftime("%Y-%m-%d"),
+            "value": buckets[i],
+        }
+        for i in range(weeks)
+    ]
+    avg = sum(buckets) / len(buckets) if buckets else None
+    return {"data": {"weeks": series, "average_per_week": avg, "weeks_counted": weeks}}
+
+
 def _label_rows(rows: list[dict], field: str, label: str) -> list[dict]:
     return [
         {label: r.get(field, ""), "views": _safe_int(r.get("views"))} for r in rows if r.get(field)
@@ -471,6 +548,7 @@ _ENDPOINTS = {
     "/usage/topErrors": _top_errors,
     "/usage/devices": _devices,
     "/usage/geography": _geography,
+    "/usage/cognitoWeeklySignIns": _cognito_weekly_sign_ins,
 }
 
 

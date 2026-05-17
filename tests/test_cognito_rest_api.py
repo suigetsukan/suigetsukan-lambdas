@@ -306,6 +306,47 @@ def test_handler_get_list_includes_groups_per_user():
         assert approved_by_email["bob@example.com"]["groups"] == []
 
 
+def test_handler_get_list_includes_total_count():
+    """`/list` includes total_count matching all_users length."""
+    all_users_response = {
+        "ResponseMetadata": {"HTTPStatusCode": 200},
+        "Users": [
+            {"Username": "alice", "Attributes": [{"Name": "email", "Value": "alice@example.com"}]},
+            {"Username": "bob", "Attributes": [{"Name": "email", "Value": "bob@example.com"}]},
+            {
+                "Username": "carol",
+                "Attributes": [{"Name": "email", "Value": "carol@example.com"}],
+            },
+        ],
+    }
+
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "AWS_REGION": "us-west-1",
+                "AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123",
+                "AWS_SES_SOURCE_EMAIL": "test@example.com",
+            },
+        ),
+        patch("boto3.client") as mock_boto,
+    ):
+        cognito_mock = MagicMock()
+        cognito_mock.list_users.return_value = all_users_response
+        cognito_mock.list_users_in_group.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Users": [],
+        }
+        mock_boto.return_value = cognito_mock
+
+        app = _load_cognito_rest_app()
+        event = {"httpMethod": "GET", "path": "/list", **AUTH_CONTEXT}
+        result = app.handler(event, MagicMock())
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert body["total_count"] == len(all_users_response["Users"])
+
+
 def test_handler_get_list_admin_returns_admin_emails():
     with (
         patch.dict(

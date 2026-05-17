@@ -7,7 +7,9 @@
   "memory_size": 256,
   "env_vars": {
     "AWS_REGION": "placeholder",
+    "AWS_COGNITO_USER_POOL_ID": "optional",
     "RUM_REGION": "optional",
+    "COGNITO_METRICS_REGION": "optional",
     "RUM_APP_MONITOR_NAME": "optional",
     "RUM_LOG_GROUP": "optional",
     "CORS_ALLOWED_ORIGIN": "optional",
@@ -15,6 +17,7 @@
   },
   "optional_env_vars": [
     "RUM_REGION",
+    "COGNITO_METRICS_REGION",
     "RUM_APP_MONITOR_NAME",
     "RUM_LOG_GROUP",
     "CORS_ALLOWED_ORIGIN",

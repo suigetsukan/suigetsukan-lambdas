@@ -374,6 +374,92 @@ def test_cache_hit_skips_second_aws_call(env):
         assert cw.get_metric_statistics.call_count == calls_after_first
 
 
+def _make_cw_with_metric_data(timestamps_values):
+    """CloudWatch mock returning a single MetricDataResults entry."""
+    cw = MagicMock()
+    timestamps = [tv[0] for tv in timestamps_values]
+    values = [tv[1] for tv in timestamps_values]
+    cw.get_metric_data.return_value = {
+        "MetricDataResults": [
+            {
+                "Id": "signins",
+                "Timestamps": timestamps,
+                "Values": values,
+            }
+        ]
+    }
+    return cw
+
+
+def test_cognito_weekly_sign_ins_buckets_into_four_weeks(env):
+    """Daily datapoints across 28 days are summed into 4 weekly buckets."""
+    from datetime import timedelta
+
+    end = datetime.now(UTC)
+    start = end - timedelta(days=28)
+    # Place a known value in each week: 10 in week 0, 20 in week 1, 30 in week 2, 40 in week 3.
+    timestamps_values = [
+        (start + timedelta(days=2), 10.0),
+        (start + timedelta(days=9), 20.0),
+        (start + timedelta(days=16), 30.0),
+        (start + timedelta(days=23), 40.0),
+    ]
+    cw = _make_cw_with_metric_data(timestamps_values)
+    logs = _make_logs_mock()
+
+    def factory(service, region_name=None):
+        if service == "cloudwatch":
+            return cw
+        if service == "logs":
+            return logs
+        raise AssertionError(f"unexpected client: {service}")
+
+    with (
+        patch.dict("os.environ", {"AWS_COGNITO_USER_POOL_ID": "us-west-1_abc123"}, clear=False),
+        patch("boto3.client", side_effect=factory),
+    ):
+        app = _load_app()
+        result = app.lambda_handler(
+            {
+                "httpMethod": "GET",
+                "path": "/usage/cognitoWeeklySignIns",
+                "queryStringParameters": {"days": "28"},
+                **AUTH_CONTEXT,
+            },
+            None,
+        )
+    body = json.loads(result["body"])
+    assert body["data"]["weeks_counted"] == 4
+    assert len(body["data"]["weeks"]) == 4
+    weeks = body["data"]["weeks"]
+    assert weeks[0]["value"] == 10.0
+    assert weeks[1]["value"] == 20.0
+    assert weeks[2]["value"] == 30.0
+    assert weeks[3]["value"] == 40.0
+    assert body["data"]["average_per_week"] == pytest.approx(25.0)
+
+
+def test_cognito_weekly_sign_ins_without_user_pool_id_returns_error(env):
+    """Missing AWS_COGNITO_USER_POOL_ID surfaces a clean error, no AWS call."""
+    cw = MagicMock()
+    logs = _make_logs_mock()
+    with (
+        patch.dict("os.environ", {}, clear=False),
+        patch("boto3.client", side_effect=_client_factory(cw, logs)),
+    ):
+        import os as _os
+
+        _os.environ.pop("AWS_COGNITO_USER_POOL_ID", None)
+        app = _load_app()
+        result = app.lambda_handler(
+            {"httpMethod": "GET", "path": "/usage/cognitoWeeklySignIns", **AUTH_CONTEXT}, None
+        )
+    body = json.loads(result["body"])
+    assert body["data"] is None
+    assert "AWS_COGNITO_USER_POOL_ID" in body["error"]
+    cw.get_metric_data.assert_not_called()
+
+
 def test_aws_failure_returns_data_null_error(env):
     from botocore.exceptions import ClientError
 
