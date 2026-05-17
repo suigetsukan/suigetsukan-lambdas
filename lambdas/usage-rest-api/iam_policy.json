@@ -5,6 +5,7 @@
       "Sid": "CloudWatchMetrics",
       "Effect": "Allow",
       "Action": [
+        "cloudwatch:GetMetricData",
         "cloudwatch:GetMetricStatistics",
         "cloudwatch:ListMetrics"
       ],

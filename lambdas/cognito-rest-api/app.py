@@ -370,9 +370,11 @@ def list_handler(client, user_pool_id):
         {**u, "groups": sorted(membership.get(u["user_name"], []))} for u in approved_users
     ]
 
+    total_count = len(all_users)
     body = {
         "approved": sorted(enriched_approved, key=lambda x: x["email"]),
         "unapproved": unapproved_users,
+        "total_count": total_count,
     }
     return body
 
