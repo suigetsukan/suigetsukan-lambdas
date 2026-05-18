@@ -88,6 +88,8 @@ _OWNED_MODULE_NAMES = (
     "app_contributor_submission_manager",
     "app",
     "auth",
+    "media_convert",
+    "notifications",
     "presign",
     "responses",
     "submissions",
@@ -474,20 +476,396 @@ def test_s3_event_duplicate_is_idempotent(app_module):
 
 
 # ---------------------------------------------------------------------------
-# Administration stubs land in PR2; verify they return 501 in this PR so
-# the dispatcher table is exercised end-to-end.
+# GET /administration/submissions
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("GET", "/administration/submissions"),
-        ("POST", "/administration/decide"),
-        ("GET", "/administration/submissions/{submissionId}/presigned-preview-url"),
-    ],
-)
-def test_administration_routes_return_501_until_pr2(app_module, method, path):
-    event = _api_event(method, path, claims=APPROVER_CLAIMS, body="{}")
-    result = app_module.handler(event, None)
-    assert result["statusCode"] == 501
+def _pending_item(submission_id: str = "p1") -> dict:
+    """A fully-populated DDB row in state=pending-review for admin tests."""
+    return {
+        "submissionId": submission_id,
+        "userId": "user-abc",
+        "contributorEmail": "yamamoto@example.com",
+        "fileName": "clip.mp4",
+        "s3Key": f"staging/user-abc/{submission_id}/clip.mp4",
+        "s3Bucket": "test-submissions-bucket",
+        "uploadedAt": 1700000000,
+        "submittedForReviewAt": 1700001000,
+        "state": "pending-review",
+        "art": "aikido",
+        "scroll": "ikkajo",
+        "rank": "standard",
+        "technique": "Technique 5",
+        "techniqueCode": "a1505",
+        "variation": "a",
+    }
+
+
+def test_list_admin_submissions_defaults_to_pending_review(app_module):
+    fake_table = MagicMock()
+    fake_table.query.return_value = {"Items": [_pending_item()], "LastEvaluatedKey": None}
+    with patch.object(app_module.submissions, "_table", return_value=fake_table):
+        result = app_module.handler(
+            _api_event("GET", "/administration/submissions", claims=APPROVER_CLAIMS), None
+        )
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert len(body["submissions"]) == 1
+    item = body["submissions"][0]
+    # Admin projection exposes the moderator-only fields the contributor
+    # projection hides.
+    assert item["contributorEmail"] == "yamamoto@example.com"
+    assert item["s3Bucket"] == "test-submissions-bucket"
+    assert item["s3Key"].startswith("staging/")
+    kwargs = fake_table.query.call_args.kwargs
+    assert kwargs["IndexName"] == "state-decidedAt"
+    assert kwargs["ExpressionAttributeValues"][":state"] == "pending-review"
+
+
+def test_list_admin_submissions_filters_by_explicit_state(app_module):
+    fake_table = MagicMock()
+    fake_table.query.return_value = {"Items": [], "LastEvaluatedKey": None}
+    with patch.object(app_module.submissions, "_table", return_value=fake_table):
+        result = app_module.handler(
+            _api_event(
+                "GET",
+                "/administration/submissions",
+                claims=APPROVER_CLAIMS,
+                queryStringParameters={"state": "approved"},
+            ),
+            None,
+        )
+    assert result["statusCode"] == 200
+    assert fake_table.query.call_args.kwargs["ExpressionAttributeValues"][":state"] == "approved"
+
+
+def test_list_admin_submissions_rejects_unknown_state(app_module):
+    result = app_module.handler(
+        _api_event(
+            "GET",
+            "/administration/submissions",
+            claims=APPROVER_CLAIMS,
+            queryStringParameters={"state": "nonsense"},
+        ),
+        None,
+    )
+    assert result["statusCode"] == 400
+
+
+# ---------------------------------------------------------------------------
+# POST /administration/decide
+# ---------------------------------------------------------------------------
+
+
+def test_decide_approved_copies_to_mediaconvert_and_records(app_module):
+    """Happy path: approve a pending submission.
+
+    DynamoDB get_item returns the pending row; S3 copy_object succeeds;
+    update_item flips state to approved and records mediaConvertKey.
+    SES send_email is best-effort and asserted to have been called.
+    """
+    pending = _pending_item("approve-1")
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": pending}
+    fake_table.update_item.return_value = {
+        "Attributes": {
+            **pending,
+            "state": "approved",
+            "decidedAt": 1700002000,
+            "mediaConvertKey": "a1505a.mp4",
+        }
+    }
+    fake_s3 = MagicMock()
+    fake_ses = MagicMock()
+    fake_ses.send_email.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+    with (
+        patch.object(app_module.submissions, "_table", return_value=fake_table),
+        patch.object(app_module.media_convert, "_s3_client", return_value=fake_s3),
+        patch.object(app_module.notifications, "_ses_client", return_value=fake_ses),
+    ):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/administration/decide",
+                claims=APPROVER_CLAIMS,
+                body=json.dumps(
+                    {
+                        "submissionId": "approve-1",
+                        "decision": "approved",
+                        "reason": "Looks good",
+                    }
+                ),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["state"] == "approved"
+    assert body["mediaConvertKey"] == "a1505a.mp4"
+
+    # Verify the file landed in the approved bucket with the dense name.
+    copy_kwargs = fake_s3.copy_object.call_args.kwargs
+    assert copy_kwargs["Bucket"] == "test-approved-bucket"
+    assert copy_kwargs["Key"] == "a1505a.mp4"
+    assert copy_kwargs["CopySource"] == {
+        "Bucket": "test-submissions-bucket",
+        "Key": "staging/user-abc/approve-1/clip.mp4",
+    }
+    # Verify the SES send was attempted with the contributor's address.
+    assert fake_ses.send_email.called
+    send_kwargs = fake_ses.send_email.call_args.kwargs
+    assert send_kwargs["Destination"]["ToAddresses"] == ["yamamoto@example.com"]
+    assert "approved" in send_kwargs["Message"]["Subject"]["Data"].lower()
+
+
+def test_decide_declined_skips_copy_and_records_reason(app_module):
+    pending = _pending_item("decline-1")
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": pending}
+    fake_table.update_item.return_value = {
+        "Attributes": {
+            **pending,
+            "state": "declined",
+            "decidedAt": 1700002500,
+            "decisionReason": "Camera was out of focus",
+        }
+    }
+    fake_s3 = MagicMock()
+    fake_ses = MagicMock()
+    fake_ses.send_email.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+    with (
+        patch.object(app_module.submissions, "_table", return_value=fake_table),
+        patch.object(app_module.media_convert, "_s3_client", return_value=fake_s3),
+        patch.object(app_module.notifications, "_ses_client", return_value=fake_ses),
+    ):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/administration/decide",
+                claims=APPROVER_CLAIMS,
+                body=json.dumps(
+                    {
+                        "submissionId": "decline-1",
+                        "decision": "declined",
+                        "reason": "Camera was out of focus",
+                    }
+                ),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 200
+    assert json.loads(result["body"])["state"] == "declined"
+    fake_s3.copy_object.assert_not_called()
+    # SES still fires — the contributor learns about the decline.
+    assert fake_ses.send_email.called
+    assert "feedback" in fake_ses.send_email.call_args.kwargs["Message"]["Subject"]["Data"].lower()
+
+
+def test_decide_changes_requested_skips_copy(app_module):
+    pending = _pending_item("changes-1")
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": pending}
+    fake_table.update_item.return_value = {
+        "Attributes": {**pending, "state": "changes-requested", "decidedAt": 1700003000},
+    }
+    fake_s3 = MagicMock()
+    fake_ses = MagicMock()
+    fake_ses.send_email.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+    with (
+        patch.object(app_module.submissions, "_table", return_value=fake_table),
+        patch.object(app_module.media_convert, "_s3_client", return_value=fake_s3),
+        patch.object(app_module.notifications, "_ses_client", return_value=fake_ses),
+    ):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/administration/decide",
+                claims=APPROVER_CLAIMS,
+                body=json.dumps(
+                    {
+                        "submissionId": "changes-1",
+                        "decision": "changes-requested",
+                        "reason": "Try once more with the bokken oriented forward",
+                    }
+                ),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 200
+    assert json.loads(result["body"])["state"] == "changes-requested"
+    fake_s3.copy_object.assert_not_called()
+
+
+def test_decide_rejects_unknown_decision(app_module):
+    result = app_module.handler(
+        _api_event(
+            "POST",
+            "/administration/decide",
+            claims=APPROVER_CLAIMS,
+            body=json.dumps({"submissionId": "x", "decision": "maybe"}),
+        ),
+        None,
+    )
+    assert result["statusCode"] == 400
+
+
+def test_decide_returns_404_when_submission_missing(app_module):
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {}
+    with patch.object(app_module.submissions, "_table", return_value=fake_table):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/administration/decide",
+                claims=APPROVER_CLAIMS,
+                body=json.dumps({"submissionId": "nope", "decision": "approved"}),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 404
+
+
+def test_decide_returns_409_when_not_pending_review(app_module):
+    already_approved = {**_pending_item("p1"), "state": "approved"}
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": already_approved}
+    with patch.object(app_module.submissions, "_table", return_value=fake_table):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/administration/decide",
+                claims=APPROVER_CLAIMS,
+                body=json.dumps({"submissionId": "p1", "decision": "approved"}),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 409
+
+
+def test_decide_returns_400_when_approval_required_fields_missing(app_module):
+    incomplete = _pending_item("nocode")
+    incomplete["techniqueCode"] = ""
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": incomplete}
+    with patch.object(app_module.submissions, "_table", return_value=fake_table):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/administration/decide",
+                claims=APPROVER_CLAIMS,
+                body=json.dumps({"submissionId": "nocode", "decision": "approved"}),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 400
+    assert "techniqueCode" in json.loads(result["body"])["error"]
+
+
+def test_decide_does_not_block_on_ses_failure(app_module):
+    """A failed SES send must NOT fail the decision API response.
+
+    The decision is durable in DynamoDB before the email goes out, so we
+    log the failure and return 200 — the moderator's action persisted.
+    """
+    pending = _pending_item("ses-fail")
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": pending}
+    fake_table.update_item.return_value = {
+        "Attributes": {**pending, "state": "declined", "decidedAt": 1700004000},
+    }
+    fake_ses = MagicMock()
+    fake_ses.send_email.side_effect = RuntimeError("SES is down")
+    with (
+        patch.object(app_module.submissions, "_table", return_value=fake_table),
+        patch.object(app_module.notifications, "_ses_client", return_value=fake_ses),
+    ):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/administration/decide",
+                claims=APPROVER_CLAIMS,
+                body=json.dumps(
+                    {
+                        "submissionId": "ses-fail",
+                        "decision": "declined",
+                        "reason": "audio is choppy",
+                    }
+                ),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 200
+
+
+# ---------------------------------------------------------------------------
+# GET /administration/submissions/{submissionId}/presigned-preview-url
+# ---------------------------------------------------------------------------
+
+
+def test_preview_url_returns_signed_get(app_module):
+    item = _pending_item("preview-1")
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": item}
+    fake_s3 = MagicMock()
+    fake_s3.generate_presigned_url.return_value = "https://s3.example/get?sig=x"
+    with (
+        patch.object(app_module.submissions, "_table", return_value=fake_table),
+        patch.object(app_module.presign, "_s3_client", return_value=fake_s3),
+    ):
+        result = app_module.handler(
+            _api_event(
+                "GET",
+                "/administration/submissions/{submissionId}/presigned-preview-url",
+                claims=APPROVER_CLAIMS,
+                pathParameters={"submissionId": "preview-1"},
+            ),
+            None,
+        )
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["presignedUrl"] == "https://s3.example/get?sig=x"
+    assert body["submissionId"] == "preview-1"
+    assert body["expiresInSeconds"] == 60 * 60
+    call = fake_s3.generate_presigned_url.call_args
+    assert call.kwargs["ClientMethod"] == "get_object"
+    assert call.kwargs["HttpMethod"] == "GET"
+
+
+def test_preview_url_returns_404_when_submission_missing(app_module):
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {}
+    with patch.object(app_module.submissions, "_table", return_value=fake_table):
+        result = app_module.handler(
+            _api_event(
+                "GET",
+                "/administration/submissions/{submissionId}/presigned-preview-url",
+                claims=APPROVER_CLAIMS,
+                pathParameters={"submissionId": "missing"},
+            ),
+            None,
+        )
+    assert result["statusCode"] == 404
+
+
+# ---------------------------------------------------------------------------
+# media_convert.build_approved_key — unit tests for the filename composer
+# ---------------------------------------------------------------------------
+
+
+def test_build_approved_key_composes_dense_filename(app_module):
+    assert app_module.media_convert.build_approved_key("a1505", "a", "clip.mp4") == "a1505a.mp4"
+
+
+def test_build_approved_key_preserves_original_extension(app_module):
+    assert app_module.media_convert.build_approved_key("c01", "b", "recording.MOV") == "c01b.mov"
+
+
+def test_build_approved_key_defaults_to_mp4_when_extension_unknown(app_module):
+    assert app_module.media_convert.build_approved_key("a1505", "a", "noextension") == "a1505a.mp4"
+
+
+def test_build_approved_key_rejects_invalid_variation(app_module):
+    with pytest.raises(ValueError):
+        app_module.media_convert.build_approved_key("a1505", "AA", "clip.mp4")
+    with pytest.raises(ValueError):
+        app_module.media_convert.build_approved_key("a1505", "1", "clip.mp4")
