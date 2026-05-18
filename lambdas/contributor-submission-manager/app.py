@@ -18,11 +18,12 @@ dispatcher discriminates on shape and forwards accordingly. This keeps the
 two integration paths in one deployment artifact (one role, one set of
 env vars, one CI step) while leaving the API surface easy to reason about.
 
-The approval endpoints, MediaConvert hand-off, and SES notifications land
-in a follow-up PR (``feat/contributor-backend-approval``). The dispatcher
-already routes them through to placeholder handlers so the route table is
-visible end-to-end; those handlers return ``501 Not Implemented`` until
-the follow-up wires the real logic.
+The approval flow (``POST /administration/decide``) hands an approved file
+off to the existing MediaConvert ingest pipeline by ``copy_object``-ing it
+into ``APPROVED_FOR_TRANSCODING_BUCKET``; the existing ``file-name-decipher``
+Lambda already watches that bucket and takes over from there. Decline /
+changes-requested decisions stop short of the copy and surface the reason
+in a notification email.
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ from common.constants import (
 )
 
 import auth
+import media_convert
+import notifications
 import presign
 import responses
 import submissions
@@ -52,7 +55,6 @@ logger.setLevel(logging.INFO)
 HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
 HTTP_CONFLICT = 409
-HTTP_NOT_IMPLEMENTED = 501
 HTTP_SERVER_ERROR = 500
 
 DEFAULT_LIST_LIMIT = 20
@@ -266,6 +268,25 @@ def _projection_for_contributor(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _projection_for_admin(item: dict[str, Any]) -> dict[str, Any]:
+    """Admin wire shape — like the contributor projection plus PII (email)
+    and storage pointers (bucket / key) the moderator uses to preview the
+    file. The contributor projection deliberately omits those because the
+    contributor already knows where their own file lives.
+    """
+    base = _projection_for_contributor(item)
+    base.update(
+        {
+            "contributorEmail": item.get("contributorEmail"),
+            "s3Bucket": item.get("s3Bucket"),
+            "s3Key": item.get("s3Key"),
+            "decisionBy": item.get("decisionBy"),
+            "mediaConvertKey": item.get("mediaConvertKey"),
+        }
+    )
+    return base
+
+
 def _classification_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
     if not item.get("art"):
         return None
@@ -369,34 +390,144 @@ def _extract_classification(body: dict[str, Any]) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Administration handlers — full implementation lands in PR2.
-# Stubbed here so the dispatcher table is complete and the public surface
-# is visible to anyone reading the file.
+# Administration handlers
 # ---------------------------------------------------------------------------
 
 
 def _handle_list_admin_submissions(event: dict) -> dict:
     _require_group(event, COGNITO_GROUP_APPROVER)
-    return responses.error(
-        HTTP_NOT_IMPLEMENTED,
-        "Administration endpoints land in feat/contributor-backend-approval",
+    query = event.get("queryStringParameters") or {}
+    state = query.get("state") or submissions.STATE_PENDING_REVIEW
+    if state not in submissions.ALL_STATES:
+        raise _ApiError(HTTP_BAD_REQUEST, f"Unknown state: {state}")
+    items, last_key = submissions.list_by_state(state, _list_limit(event), _next_token_in(event))
+    return responses.success(
+        {
+            "submissions": [_projection_for_admin(i) for i in items],
+            "nextToken": _next_token_out(last_key),
+        }
     )
 
 
 def _handle_decide(event: dict) -> dict:
     _require_group(event, COGNITO_GROUP_APPROVER)
-    return responses.error(
-        HTTP_NOT_IMPLEMENTED,
-        "Administration endpoints land in feat/contributor-backend-approval",
+    body = _parse_body(event)
+    decision = body.get("decision")
+    if decision not in _DECISION_TO_STATE:
+        raise _ApiError(
+            HTTP_BAD_REQUEST,
+            "decision must be one of: approved, declined, changes-requested",
+        )
+    submission_id = body.get("submissionId")
+    if not submission_id:
+        raise _ApiError(HTTP_BAD_REQUEST, "submissionId is required")
+    reason = body.get("reason") or None
+
+    existing = submissions.get(submission_id)
+    if existing is None:
+        raise _ApiError(HTTP_NOT_FOUND, f"No submission with id {submission_id}")
+    if existing.get("state") != submissions.STATE_PENDING_REVIEW:
+        raise _ApiError(
+            HTTP_CONFLICT,
+            f"Submission state is {existing.get('state')}, not pending-review",
+        )
+
+    extra = _approval_copy_attrs(existing) if decision == "approved" else None
+    decided_by = auth.get_user_email(event) or auth.get_user_id(event) or "unknown"
+    try:
+        updated = submissions.record_decision(
+            submission_id=submission_id,
+            decision_state=_DECISION_TO_STATE[decision],
+            decided_by=decided_by,
+            decision_reason=reason,
+            extra=extra,
+        )
+    except Exception as err:  # noqa: BLE001 — translate to HTTP
+        if _is_conditional_check_failure(err):
+            raise _ApiError(
+                HTTP_CONFLICT,
+                "Submission was decided by someone else; reload the queue",
+            ) from err
+        raise
+
+    # Email is best-effort — log on failure but don't fail the API call.
+    notifications.send_decision_email(updated)
+
+    response_body = {
+        "submissionId": updated["submissionId"],
+        "state": updated["state"],
+        "decidedAt": _coerce_int(updated.get("decidedAt")),
+    }
+    if extra and extra.get("mediaConvertKey"):
+        response_body["mediaConvertKey"] = extra["mediaConvertKey"]
+    return responses.success(response_body)
+
+
+def _approval_copy_attrs(submission: dict[str, Any]) -> dict[str, Any]:
+    """Copy the file to the approved bucket and return DDB fields to persist.
+
+    Validates that the row has the classification and storage pointers we
+    expect. Raises ``_ApiError(400)`` with a specific message on any
+    missing field so the moderator UI can surface what went wrong without
+    a generic 500.
+    """
+    missing = [
+        field
+        for field in ("techniqueCode", "variation", "fileName", "s3Bucket", "s3Key")
+        if not submission.get(field)
+    ]
+    if missing:
+        raise _ApiError(
+            HTTP_BAD_REQUEST,
+            "Submission is missing required attributes for approval: " + ", ".join(missing),
+        )
+    copy_result = media_convert.copy_to_approved_bucket(
+        source_bucket=submission["s3Bucket"],
+        source_key=submission["s3Key"],
+        technique_code=submission["techniqueCode"],
+        variation=submission["variation"],
+        file_name=submission["fileName"],
     )
+    return {
+        "mediaConvertBucket": copy_result.target_bucket,
+        "mediaConvertKey": copy_result.target_key,
+    }
 
 
 def _handle_preview_url(event: dict) -> dict:
     _require_group(event, COGNITO_GROUP_APPROVER)
-    return responses.error(
-        HTTP_NOT_IMPLEMENTED,
-        "Administration endpoints land in feat/contributor-backend-approval",
+    submission_id = (event.get("pathParameters") or {}).get("submissionId")
+    if not submission_id:
+        raise _ApiError(HTTP_BAD_REQUEST, "submissionId path parameter is required")
+    item = submissions.get(submission_id)
+    if item is None:
+        raise _ApiError(HTTP_NOT_FOUND, f"No submission with id {submission_id}")
+    bucket = item.get("s3Bucket")
+    key = item.get("s3Key")
+    if not bucket or not key:
+        raise _ApiError(
+            HTTP_CONFLICT,
+            "Submission has no associated S3 object",
+        )
+    url = presign.generate_preview_url(bucket, key)
+    return responses.success(
+        {
+            "presignedUrl": url,
+            "submissionId": submission_id,
+            "expiresInSeconds": presign.PREVIEW_URL_TTL_SECONDS,
+        }
     )
+
+
+# Map the JSON wire value (``approved`` / ``declined`` / ``changes-requested``)
+# to the DynamoDB state constant. Doing it here rather than in
+# ``submissions.py`` keeps the wire shape decoupled from storage and means
+# changing the JSON contract is a one-file edit.
+_DECISION_TO_STATE: dict[str, str] = {
+    "approved": submissions.STATE_APPROVED,
+    "declined": submissions.STATE_DECLINED,
+    "changes-requested": submissions.STATE_CHANGES_REQUESTED,
+}
 
 
 # ---------------------------------------------------------------------------
