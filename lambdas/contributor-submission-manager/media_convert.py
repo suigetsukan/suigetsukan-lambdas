@@ -21,11 +21,18 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 
 import boto3
 
 logger = logging.getLogger(__name__)
+
+# Mirror of the guard in app.py's submit-for-review validation: lowercase
+# alphanumeric, letter-first, 2–10 chars. Defense in depth — this is the
+# last stop before the value becomes an object key in the transcoding
+# bucket, where a fabricated code could overwrite an existing video.
+_TECHNIQUE_CODE_RE = re.compile(r"^[a-z][a-z0-9]{1,9}$")
 
 
 @dataclass(frozen=True)
@@ -51,7 +58,7 @@ def build_approved_key(technique_code: str, variation: str, original_file_name: 
     empty / containing path separators is a programming error somewhere
     upstream and we'd rather fail loudly than write a malformed key.
     """
-    if not technique_code or "/" in technique_code:
+    if not technique_code or not _TECHNIQUE_CODE_RE.match(technique_code):
         raise ValueError(f"Invalid techniqueCode: {technique_code!r}")
     if not variation or len(variation) != 1 or not variation.isalpha():
         raise ValueError(f"Invalid variation: {variation!r} (expected a single letter)")
