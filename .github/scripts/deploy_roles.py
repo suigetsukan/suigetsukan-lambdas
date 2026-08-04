@@ -38,8 +38,9 @@ def load_config(lambda_dir: Path) -> dict:
         return json.load(f)
 
 
+# Cost Explorer ("ce") has no AWS-managed service policy; lambdas that use it
+# must carry a per-lambda iam_policy.json (see lambdas/billing-rest-api/).
 POLICY_MAP = {
-    "ce": "arn:aws:iam::aws:policy/AWSCostExplorerReadOnlyAccess",
     "cloudwatch": "arn:aws:iam::aws:policy/CloudWatchFullAccess",
     "cognito-idp": "arn:aws:iam::aws:policy/AmazonCognitoPowerUser",
     "dynamodb": "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
@@ -98,39 +99,46 @@ def _attach_inline_policy_if_present(role_name: str, lambda_dir: Path) -> bool:
     return True
 
 
-def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
-    services = _discover_services(lambda_dir)
+def _role_exists(role_name: str) -> bool:
+    """True if the role exists; only get_role's NoSuchEntity means 'missing'."""
     try:
         iam.get_role(RoleName=role_name)
-        print(f"  Role {role_name} exists")
-        _ensure_policies_attached(role_name, services)
-        _attach_inline_policy_if_present(role_name, lambda_dir)
+        return True
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchEntity":
-            print(f"  Creating role {role_name}")
-            trust_policy = {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"Service": "lambda.amazonaws.com"},
-                        "Action": "sts:AssumeRole",
-                    }
-                ],
-            }
-            iam.create_role(
-                RoleName=role_name,
-                AssumeRolePolicyDocument=json.dumps(trust_policy),
-                Description=f"Execution role for {function_name}",
-            )
-            basic_policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-            iam.attach_role_policy(RoleName=role_name, PolicyArn=basic_policy_arn)
-            print(f"  Attached {basic_policy_arn}")
-            _ensure_policies_attached(role_name, services)
-            _attach_inline_policy_if_present(role_name, lambda_dir)
-            time.sleep(30)
-        else:
-            raise
+            return False
+        raise
+
+
+def create_or_update_role(role_name: str, function_name: str, lambda_dir: Path):
+    services = _discover_services(lambda_dir)
+    created = not _role_exists(role_name)
+    if created:
+        print(f"  Creating role {role_name}")
+        trust_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "lambda.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+        iam.create_role(
+            RoleName=role_name,
+            AssumeRolePolicyDocument=json.dumps(trust_policy),
+            Description=f"Execution role for {function_name}",
+        )
+        basic_policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        iam.attach_role_policy(RoleName=role_name, PolicyArn=basic_policy_arn)
+        print(f"  Attached {basic_policy_arn}")
+    else:
+        print(f"  Role {role_name} exists")
+    _ensure_policies_attached(role_name, services)
+    _attach_inline_policy_if_present(role_name, lambda_dir)
+    if created:
+        time.sleep(30)
 
 
 def main():
