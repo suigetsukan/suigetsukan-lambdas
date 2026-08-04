@@ -113,12 +113,17 @@ def submit_for_review(
     submission_id: str,
     user_id: str,
     classification: dict[str, str],
+    contributor_email: str | None = None,
 ) -> dict[str, Any]:
     """Move a row from awaiting-classification to pending-review.
 
     Returns the updated item. Conditional on ownership (userId match) and
     on the current state being awaiting-classification or changes-requested
     — the latter allows a contributor to resubmit after feedback.
+
+    ``contributor_email`` is persisted here (from the caller's JWT claims)
+    because the S3 ObjectCreated path that seeds the row has no way to know
+    it — and the decision notification emails need a recipient.
     """
     now = now_seconds()
     fields = {
@@ -132,6 +137,8 @@ def submit_for_review(
         "submittedForReviewAt": now,
         "state": STATE_PENDING_REVIEW,
     }
+    if contributor_email:
+        fields["contributorEmail"] = contributor_email
     update_expr, names, values = _build_set_expression(fields)
     values[":uid"] = user_id
     values[":s_awaiting"] = STATE_AWAITING_CLASSIFICATION
