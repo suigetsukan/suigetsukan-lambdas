@@ -31,6 +31,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote_plus
@@ -70,6 +71,15 @@ _REQUIRED_CLASSIFICATION_FIELDS = (
     "techniqueCode",
     "variation",
 )
+
+# Server-side guard on the client-computed dense code. The frontend is the
+# source of truth for composing the code (it owns the dropdown data), but we
+# refuse anything that doesn't look like one — the code becomes an S3 object
+# key in the transcoding bucket on approval, so a fabricated value could
+# otherwise target an arbitrary existing video. Known shapes: ``a1505``
+# (Aikido), ``b0101`` (Battodo), ``gksa`` (letters-only), ``d11`` (Danzan
+# Ryu) — lowercase alphanumeric, letter-first, 2–10 chars.
+_TECHNIQUE_CODE_RE = re.compile(r"^[a-z][a-z0-9]{1,9}$")
 
 
 # ---------------------------------------------------------------------------
@@ -360,8 +370,14 @@ def _handle_submit_for_review(event: dict) -> dict:
     if not submission_id:
         raise _ApiError(HTTP_BAD_REQUEST, "submissionId is required")
     classification = _extract_classification(body)
+    # Persist the contributor's email alongside the classification: the S3
+    # ObjectCreated seeding path has no claims to read it from, and without
+    # it the decision notification emails have no recipient.
+    contributor_email = auth.get_user_email(event)
     try:
-        updated = submissions.submit_for_review(submission_id, user_id, classification)
+        updated = submissions.submit_for_review(
+            submission_id, user_id, classification, contributor_email=contributor_email
+        )
     except Exception as err:  # noqa: BLE001 — translate to HTTP status
         if _is_conditional_check_failure(err):
             raise _ApiError(
@@ -386,7 +402,14 @@ def _extract_classification(body: dict[str, Any]) -> dict[str, str]:
             HTTP_BAD_REQUEST,
             f"Missing classification field(s): {', '.join(missing)}",
         )
-    return {field: str(body[field]) for field in _REQUIRED_CLASSIFICATION_FIELDS}
+    classification = {field: str(body[field]) for field in _REQUIRED_CLASSIFICATION_FIELDS}
+    code = classification["techniqueCode"]
+    if not _TECHNIQUE_CODE_RE.match(code):
+        raise _ApiError(HTTP_BAD_REQUEST, f"techniqueCode has an unexpected format: {code!r}")
+    variation = classification["variation"]
+    if len(variation) != 1 or not ("a" <= variation <= "z"):
+        raise _ApiError(HTTP_BAD_REQUEST, "variation must be a single lowercase letter")
+    return classification
 
 
 # ---------------------------------------------------------------------------
