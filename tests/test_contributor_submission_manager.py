@@ -394,6 +394,70 @@ def test_submit_for_review_requires_all_classification_fields(app_module):
     assert "technique" in json.loads(result["body"])["error"]
 
 
+def test_submit_for_review_stores_contributor_email_from_claims(app_module):
+    """The DDB row is seeded by the S3 trigger, which has no claims to read
+    an email from — submit-for-review is where the contributor's email gets
+    persisted so decision notifications have a recipient."""
+    fake_table = MagicMock()
+    fake_table.update_item.return_value = {
+        "Attributes": {
+            "submissionId": "s1",
+            "state": "pending-review",
+            "submittedForReviewAt": 1700001000,
+        }
+    }
+    with patch.object(app_module.submissions, "_table", return_value=fake_table):
+        result = app_module.handler(
+            _api_event(
+                "POST",
+                "/contributor/submit-for-review",
+                claims=CONTRIBUTOR_CLAIMS,
+                body=json.dumps(_VALID_CLASSIFICATION),
+            ),
+            None,
+        )
+    assert result["statusCode"] == 200
+    kwargs = fake_table.update_item.call_args.kwargs
+    written_values = set(kwargs["ExpressionAttributeValues"].values())
+    assert CONTRIBUTOR_CLAIMS["email"] in written_values
+    written_names = set(kwargs["ExpressionAttributeNames"].values())
+    assert "contributorEmail" in written_names
+
+
+@pytest.mark.parametrize(
+    "bad_code",
+    ["../../evil", "a/1505", "A1505", "a 1505", "1505", "a", "x" * 11, "a1505;rm"],
+)
+def test_submit_for_review_rejects_malformed_technique_code(app_module, bad_code):
+    body = {**_VALID_CLASSIFICATION, "techniqueCode": bad_code}
+    result = app_module.handler(
+        _api_event(
+            "POST",
+            "/contributor/submit-for-review",
+            claims=CONTRIBUTOR_CLAIMS,
+            body=json.dumps(body),
+        ),
+        None,
+    )
+    assert result["statusCode"] == 400
+    assert "techniqueCode" in json.loads(result["body"])["error"]
+
+
+@pytest.mark.parametrize("bad_variation", ["", "ab", "A", "1", "-"])
+def test_submit_for_review_rejects_malformed_variation(app_module, bad_variation):
+    body = {**_VALID_CLASSIFICATION, "variation": bad_variation}
+    result = app_module.handler(
+        _api_event(
+            "POST",
+            "/contributor/submit-for-review",
+            claims=CONTRIBUTOR_CLAIMS,
+            body=json.dumps(body),
+        ),
+        None,
+    )
+    assert result["statusCode"] == 400
+
+
 def test_submit_for_review_returns_409_on_ownership_violation(app_module):
     from botocore.exceptions import ClientError
 
@@ -869,3 +933,14 @@ def test_build_approved_key_rejects_invalid_variation(app_module):
         app_module.media_convert.build_approved_key("a1505", "AA", "clip.mp4")
     with pytest.raises(ValueError):
         app_module.media_convert.build_approved_key("a1505", "1", "clip.mp4")
+
+
+@pytest.mark.parametrize(
+    "bad_code",
+    ["", "a/1505", "../x", "A1505", "1505", "a", "x" * 11],
+)
+def test_build_approved_key_rejects_malformed_technique_code(app_module, bad_code):
+    """Defense in depth: even if a bad code somehow reached DynamoDB, the
+    copy into the transcoding bucket must refuse to compose a key from it."""
+    with pytest.raises(ValueError):
+        app_module.media_convert.build_approved_key(bad_code, "a", "clip.mp4")
