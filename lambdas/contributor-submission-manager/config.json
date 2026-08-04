@@ -1,0 +1,24 @@
+{
+  "function_name_suffix": "contributor-submission-manager",
+  "function_name": "suigetsukan-contributor-submission-manager",
+  "handler": "app.handler",
+  "runtime": "python3.12",
+  "timeout": 30,
+  "memory_size": 256,
+  "env_vars": {
+    "AWS_REGION": "placeholder",
+    "AWS_COGNITO_USER_POOL_ID": "placeholder",
+    "AWS_SES_SOURCE_EMAIL": "placeholder",
+    "CONTRIBUTOR_SUBMISSIONS_TABLE": "placeholder",
+    "CONTRIBUTOR_SUBMISSIONS_BUCKET": "placeholder",
+    "APPROVED_FOR_TRANSCODING_BUCKET": "placeholder",
+    "CURRICULUM_SITE_URL": "optional",
+    "CORS_ALLOWED_ORIGIN": "optional",
+    "REQUIRE_AUTHORIZER": "optional"
+  },
+  "optional_env_vars": ["CURRICULUM_SITE_URL", "CORS_ALLOWED_ORIGIN", "REQUIRE_AUTHORIZER"],
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "role_name": "suigetsukan-contributor-submission-manager-role",
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"]
+}

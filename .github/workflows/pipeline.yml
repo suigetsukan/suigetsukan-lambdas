@@ -180,6 +180,10 @@ jobs:
           RUM_LOG_GROUP_NAME: ${{ secrets.RUM_LOG_GROUP_NAME }}
           RUM_LOG_REGION: ${{ secrets.RUM_LOG_REGION }}
           AWS_SNS_ANALYTICS_TOPIC_ARN: ${{ secrets.AWS_SNS_ANALYTICS_TOPIC_ARN }}
+          CONTRIBUTOR_SUBMISSIONS_TABLE: ${{ secrets.CONTRIBUTOR_SUBMISSIONS_TABLE }}
+          CONTRIBUTOR_SUBMISSIONS_BUCKET: ${{ secrets.CONTRIBUTOR_SUBMISSIONS_BUCKET }}
+          APPROVED_FOR_TRANSCODING_BUCKET: ${{ secrets.APPROVED_FOR_TRANSCODING_BUCKET }}
+          CURRICULUM_SITE_URL: ${{ secrets.CURRICULUM_SITE_URL }}
         run: python .github/scripts/deploy_lambdas.py
 
       - name: Setup Lambda Triggers
