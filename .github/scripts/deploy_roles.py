@@ -52,12 +52,16 @@ POLICY_MAP = {
 }
 
 
+# Matches the service name in boto3.client(...)/boto3.resource(...) calls even when
+# extra args (region_name=..., config=...) or newlines follow the service string.
+_BOTO3_SERVICE_RE = re.compile(r'boto3\.(?:client|resource)\(\s*["\']([^"\']+)["\']')
+
+
 def _discover_services(lambda_dir: Path) -> set[str]:
     services: set[str] = set()
     for py_file in lambda_dir.glob("*.py"):
         code = py_file.read_text()
-        services.update(re.findall(r'boto3\.client\(["\']([^"\']+)["\']\)', code))
-        services.update(re.findall(r'boto3\.resource\(["\']([^"\']+)["\']\)', code))
+        services.update(_BOTO3_SERVICE_RE.findall(code))
     return services
 
 
