@@ -6,6 +6,8 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ANALYTICS_APP = REPO_ROOT / "lambdas" / "analytics-report" / "app.py"
 
@@ -97,9 +99,17 @@ def test_lambda_handler_publishes_report():
     first_call = logs_mock.start_query.call_args_list[0]
     assert first_call.kwargs["logGroupName"] == _TEST_ENV["RUM_LOG_GROUP_NAME"]
 
+    # Custom events are stored with the event name as the TOP-LEVEL
+    # event_type in the RUM vended log group -- the query must filter on
+    # that, not on a com.amazon.rum.custom_event wrapper.
+    query = first_call.kwargs["queryString"]
+    assert '"PageView"' in query
+    assert "com.amazon.rum.custom_event" not in query
 
-def test_lambda_handler_handles_query_errors():
-    """Handler should return None metrics on Logs Insights failure, not crash."""
+
+def test_lambda_handler_raises_when_all_queries_denied():
+    """If every Logs Insights query fails, the handler must raise instead of
+    publishing an empty report (so the Lambda Errors metric fires)."""
     from botocore.exceptions import ClientError
 
     logs_mock = MagicMock()
@@ -114,16 +124,14 @@ def test_lambda_handler_handles_query_errors():
         patch.dict("os.environ", _TEST_ENV, clear=False),
     ):
         app = _load_app()
-        result = app.lambda_handler({}, MagicMock())
+        with pytest.raises(RuntimeError, match="All Logs Insights queries failed"):
+            app.lambda_handler({}, MagicMock())
 
-    # All metrics should be None when every query fails
-    assert result["metrics"]["sessions"] is None
-    assert result["metrics"]["PageView"] is None
-    sns_mock.publish.assert_called_once()
+    sns_mock.publish.assert_not_called()
 
 
-def test_lambda_handler_handles_failed_query_status():
-    """A 'Failed' query status should yield None for that metric."""
+def test_lambda_handler_raises_when_all_queries_fail_status():
+    """All queries ending in 'Failed' status must also abort the publish."""
     logs_mock = MagicMock()
     logs_mock.start_query.return_value = {"queryId": "q-1"}
     logs_mock.get_query_results.return_value = {"status": "Failed", "results": []}
@@ -134,10 +142,39 @@ def test_lambda_handler_handles_failed_query_status():
         patch.dict("os.environ", _TEST_ENV, clear=False),
     ):
         app = _load_app()
+        with pytest.raises(RuntimeError, match="All Logs Insights queries failed"):
+            app.lambda_handler({}, MagicMock())
+
+    sns_mock.publish.assert_not_called()
+
+
+def test_lambda_handler_publishes_on_partial_failure():
+    """A single failed query should NOT block the report; the affected
+    metric is n/a while the rest publish normally."""
+    from botocore.exceptions import ClientError
+
+    logs_mock = MagicMock()
+    denied = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "nope"}},
+        "StartQuery",
+    )
+    # First query (event counts, this week) fails; the rest succeed.
+    logs_mock.start_query.side_effect = [denied] + [{"queryId": "q-1"}] * 5
+    logs_mock.get_query_results.return_value = {
+        "status": "Complete",
+        "results": [_row(n=3)],
+    }
+    sns_mock = MagicMock()
+
+    with (
+        patch("boto3.client", side_effect=_client_factory(logs_mock, sns_mock)),
+        patch.dict("os.environ", _TEST_ENV, clear=False),
+    ):
+        app = _load_app()
         result = app.lambda_handler({}, MagicMock())
 
     assert result["metrics"]["PageView"] is None
-    assert result["metrics"]["sessions"] is None
+    assert result["metrics"]["sessions"] == 3
     sns_mock.publish.assert_called_once()
 
 
