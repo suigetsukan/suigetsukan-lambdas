@@ -40,10 +40,11 @@ SIGNIFICANT_CHANGE_PCT = 20
 _QUERY_POLL_INTERVAL_SECS = 2
 _QUERY_TIMEOUT_SECS = 60
 
-# RUM stores custom events as one log record per event with this top-level
-# event_type. The user-defined event name (PageView, VideoPlay, ...) lives
-# inside the event_details JSON blob.
-_RUM_CUSTOM_EVENT_TYPE = "com.amazon.rum.custom_event"
+# In the RUM vended log group, each custom event is one log record whose
+# top-level ``event_type`` IS the user-defined event name (PageView,
+# VideoPlay, ...). Session/user identity lives in ``user_details``
+# (``sessionId`` / ``userId``). Verified against live records 2026-08-22.
+_TRACKED_EVENTS_QUERY_LIST = ", ".join(f'"{name}"' for name in TRACKED_EVENTS)
 
 
 def lambda_handler(_event, _context):
@@ -64,6 +65,14 @@ def lambda_handler(_event, _context):
 
     this_week = _gather_metrics(logs, log_group, this_week_start, this_week_end)
     prev_week = _gather_metrics(logs, log_group, prev_week_start, prev_week_end)
+
+    if _all_queries_failed(this_week):
+        # Refuse to publish a report with no data behind it. Raising makes
+        # the Lambda Errors metric fire so the failure is visible/alarmable
+        # instead of silently emailing an empty report.
+        msg = "All Logs Insights queries failed; aborting report publish"
+        logger.error(msg)
+        raise RuntimeError(msg)
 
     date_label = (
         f"{this_week_start.strftime('%b %d')} - "
@@ -106,24 +115,29 @@ def _gather_metrics(logs_client, log_group, start_date, end_date):
         log_group,
         start_ts,
         end_ts,
-        distinct_field="metadata.session_id",
+        distinct_field="user_details.sessionId",
     )
     metrics["unique_video_viewers"] = _query_distinct_count(
         logs_client,
         log_group,
         start_ts,
         end_ts,
-        distinct_field="user_details.user_id",
+        distinct_field="user_details.userId",
         event_name_filter="VideoPlay",
     )
     return metrics
 
 
+def _all_queries_failed(metrics):
+    """True when every metric is None, i.e. no query returned data."""
+    return all(value is None for value in metrics.values())
+
+
 def _query_event_counts(logs_client, log_group, start_ts, end_ts):
     """Return ``{event_name: count}`` for all custom events in the window."""
     query = (
-        f"fields event_details.event_type as event_name\n"
-        f'| filter event_type = "{_RUM_CUSTOM_EVENT_TYPE}"\n'
+        f"fields event_type as event_name\n"
+        f"| filter event_type in [{_TRACKED_EVENTS_QUERY_LIST}]\n"
         f"| stats count() as event_count by event_name\n"
         f"| limit 100"
     )
@@ -149,9 +163,10 @@ def _query_distinct_count(
     event_name_filter=None,
 ):
     """Return count_distinct(<field>) over the window, or None on error."""
-    parts = [f'filter event_type = "{_RUM_CUSTOM_EVENT_TYPE}"']
     if event_name_filter is not None:
-        parts.append(f'| filter event_details.event_type = "{event_name_filter}"')
+        parts = [f'filter event_type = "{event_name_filter}"']
+    else:
+        parts = [f"filter event_type in [{_TRACKED_EVENTS_QUERY_LIST}]"]
     parts.append(f"| stats count_distinct({distinct_field}) as n")
     query = "\n".join(parts)
 
