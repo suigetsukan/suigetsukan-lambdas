@@ -16,7 +16,10 @@ Steps, in order (each is its own function so the handler stays simple):
   1. export_tables       full paginated scan of each table, Decimal -> int/float
   2. build_manifest      join table variations with the source-bucket listing
   3. copy_docs           reference doc, mapping modules, RESTORE.md, VERSION
-  4. sync_videos         cross-region server-side copy of new / changed masters,
+  4. sync_videos         cross-region server-side copy of new / changed masters;
+                         masters the source bucket has tiered into Glacier /
+                         Deep Archive cannot be copied until restored, so a Bulk
+                         restore is requested and the next run copies them;
                          stops with 60 s left and lets the next run continue
   5. verify + notify     head_object on manifest + snapshots, SNS summary;
                          any exception -> SNS failure message, re-raise
@@ -77,6 +80,20 @@ TIME_RESERVE_MS = 60_000
 NO_CONTEXT_REMAINING_MS = 900_000
 # Cap on per-key lists embedded in the SNS summary so the message stays readable.
 MAX_LISTED_KEYS = 50
+
+# Source storage classes that must be restored before they can be read or copied. The
+# source bucket's lifecycle moves every tagged .mov to DEEP_ARCHIVE 90 days after upload.
+RESTORE_REQUIRED_CLASSES = ("GLACIER", "DEEP_ARCHIVE")
+# Bulk is the cheapest retrieval tier (Deep Archive: up to 48 h). No expedited tier exists
+# for Deep Archive, so a restore always spans two runs.
+SOURCE_RESTORE_TIER = "Bulk"
+# Keep the restored copy long enough for the *next monthly run* to copy it.
+SOURCE_RESTORE_DAYS = 40
+RESTORE_COMPLETE_MARKER = 'ongoing-request="false"'
+RESTORE_ALREADY_IN_PROGRESS_CODE = "RestoreAlreadyInProgress"
+READY = "ready"
+RESTORE_REQUESTED = "restore_requested"
+AWAITING_RESTORE = "awaiting_restore"
 
 META_SOURCE_ETAG = "source-etag"
 META_SOURCE_LAST_MODIFIED = "source-last-modified"
@@ -157,6 +174,7 @@ class SourceObject:
     size: int
     etag: str
     last_modified: str
+    storage_class: str = "STANDARD"
 
 
 @dataclass(frozen=True)
@@ -187,6 +205,8 @@ class SyncResult:
     copied: list[str] = field(default_factory=list)
     unchanged: int = 0
     skipped_for_time: list[str] = field(default_factory=list)
+    restore_requested: list[str] = field(default_factory=list)
+    awaiting_restore: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +386,7 @@ def list_source_objects(s3: Any, bucket: str) -> tuple[dict[str, SourceObject], 
                     if isinstance(last_modified, datetime)
                     else str(last_modified or "")
                 ),
+                storage_class=str(obj.get("StorageClass") or "STANDARD"),
             )
     logger.info("Source bucket %s: %d masters, %d junk keys", bucket, len(index), len(junk))
     return index, junk
@@ -612,14 +633,47 @@ def _copy_video(s3: Any, settings: ArchiveSettings, source: SourceObject) -> Non
     )
 
 
+def _request_restore(s3_source: Any, bucket: str, key: str) -> str:
+    """Ask S3 to restore an archived master; tolerate a restore already under way."""
+    try:
+        s3_source.restore_object(
+            Bucket=bucket,
+            Key=key,
+            RestoreRequest={
+                "Days": SOURCE_RESTORE_DAYS,
+                "GlacierJobParameters": {"Tier": SOURCE_RESTORE_TIER},
+            },
+        )
+    except ClientError as exc:
+        if str(exc.response.get("Error", {}).get("Code")) == RESTORE_ALREADY_IN_PROGRESS_CODE:
+            return AWAITING_RESTORE
+        raise
+    return RESTORE_REQUESTED
+
+
+def _ensure_readable(s3_source: Any, bucket: str, source: SourceObject) -> str:
+    """READY if the master can be copied now; otherwise request or track its restore."""
+    if source.storage_class not in RESTORE_REQUIRED_CLASSES:
+        return READY
+    restore_header = str(s3_source.head_object(Bucket=bucket, Key=source.key).get("Restore") or "")
+    if RESTORE_COMPLETE_MARKER in restore_header:
+        return READY
+    if restore_header:
+        return AWAITING_RESTORE
+    return _request_restore(s3_source, bucket, source.key)
+
+
 def sync_videos(
-    s3: Any,
+    s3_source: Any,
+    s3_archive: Any,
     settings: ArchiveSettings,
     source_index: dict[str, SourceObject],
     remaining_ms: Callable[[], int],
 ) -> SyncResult:
     """Server-side copy every new or changed master into videos/; never deletes.
 
+    Masters the source bucket has tiered into Glacier / Deep Archive cannot be copied
+    until restored: a Bulk restore is requested (or tracked) and the next run copies them.
     Stops starting copies once less than TIME_RESERVE_MS remains and records the keys it
     did not reach so the next monthly run (or a manual invoke) picks them up.
     """
@@ -633,16 +687,26 @@ def sync_videos(
                 len(result.skipped_for_time),
             )
             break
-        if not _needs_copy(s3, settings.archive_bucket, source):
+        if not _needs_copy(s3_archive, settings.archive_bucket, source):
             result.unchanged += 1
             continue
-        _copy_video(s3, settings, source)
+        state = _ensure_readable(s3_source, settings.source_bucket, source)
+        if state == RESTORE_REQUESTED:
+            result.restore_requested.append(source.key)
+            continue
+        if state == AWAITING_RESTORE:
+            result.awaiting_restore.append(source.key)
+            continue
+        _copy_video(s3_archive, settings, source)
         result.copied.append(source.key)
         logger.info("Copied %s (%d bytes)", source.key, source.size)
     logger.info(
-        "Video sync: %d copied, %d unchanged, %d skipped for time",
+        "Video sync: %d copied, %d unchanged, %d restore requested, %d awaiting restore, "
+        "%d skipped for time",
         len(result.copied),
         result.unchanged,
+        len(result.restore_requested),
+        len(result.awaiting_restore),
         len(result.skipped_for_time),
     )
     return result
@@ -699,8 +763,12 @@ def _summarize(
         ][:MAX_LISTED_KEYS],
         "videos_copied": len(sync.copied),
         "videos_unchanged": sync.unchanged,
+        "videos_restore_requested": len(sync.restore_requested),
+        "videos_awaiting_restore": len(sync.awaiting_restore),
         "videos_skipped_for_time": len(sync.skipped_for_time),
         "copied_keys": sync.copied[:MAX_LISTED_KEYS],
+        "restore_requested_keys": sync.restore_requested[:MAX_LISTED_KEYS],
+        "awaiting_restore_keys": sync.awaiting_restore[:MAX_LISTED_KEYS],
         "skipped_keys": sync.skipped_for_time[:MAX_LISTED_KEYS],
         "junk_keys": junk,
         "archive_object_count": stats[0],
@@ -721,11 +789,21 @@ def format_summary_message(summary: dict[str, Any]) -> str:
         f"orphan_source={summary[STATUS_ORPHAN_SOURCE]}",
         f"Videos: copied={summary['videos_copied']} unchanged={summary['videos_unchanged']} "
         f"skipped_for_time={summary['videos_skipped_for_time']}",
+        f"Source masters in Glacier/Deep Archive: restore_requested="
+        f"{summary['videos_restore_requested']} ({SOURCE_RESTORE_TIER} tier, up to 48 h) "
+        f"awaiting_restore={summary['videos_awaiting_restore']}; copied on the next run",
         f"Junk keys (not archived): {summary['junk_keys'] or 'none'}",
         f"Archive: {summary['archive_object_count']} objects, {gib:.2f} GiB",
         f"Elapsed: {summary['elapsed_seconds']} s",
     ]
-    for label in ("missing_source_stems", "orphan_source_keys", "copied_keys", "skipped_keys"):
+    for label in (
+        "missing_source_stems",
+        "orphan_source_keys",
+        "copied_keys",
+        "restore_requested_keys",
+        "awaiting_restore_keys",
+        "skipped_keys",
+    ):
         if summary[label]:
             lines.append(f"{label}: {', '.join(summary[label])}")
     return "\n".join(lines) + "\n"
@@ -761,7 +839,7 @@ def run_archive(
     rows = build_manifest(tables, source_index)
     write_manifest(s3, settings, snapshot, rows)
     copy_docs(s3, settings, snapshot)
-    sync = sync_videos(s3, settings, source_index, remaining_ms)
+    sync = sync_videos(clients["s3_source"], s3, settings, source_index, remaining_ms)
     verify_snapshot(s3, settings.archive_bucket, snapshot, list(tables))
     stats = archive_stats(s3, settings.archive_bucket)
     return _summarize(rows, sync, junk, stats, snapshot, time.monotonic() - started)
