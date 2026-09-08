@@ -63,10 +63,36 @@ on the 1st of every month). Each run, in order:
    `CopySource` in us-west-1), stamping `source-etag`, `source-last-modified`, `stem`
    metadata. Keys failing the pattern (e.g. `bi01ca.movv`) are listed as junk, never
    copied. Copying stops with 60 s of Lambda time left; skipped keys are reported and the
-   next run continues.
+   next run continues. **Masters in Glacier / Deep Archive** (see below) cannot be copied
+   until restored: the Lambda requests a Bulk restore for 40 days and copies them on the
+   next run; the summary reports `restore_requested` and `awaiting_restore` counts.
 5. **Verify + notify** — `head_object` on the manifest and each table snapshot, then an SNS
    summary. Any exception → SNS failure message and re-raise, so the invocation shows as
    failed in CloudWatch.
+
+## Source masters live in Deep Archive
+
+The source bucket has a lifecycle rule (`ArchiveTaggedMovToDeepArchive`) that moves every
+`.mov` tagged `FileType=mov` to `DEEP_ARCHIVE` 90 days after upload; as of 2026-09-08 all
+542 masters were there. A Deep Archive object cannot be read or server-side copied until
+it has been *restored*, and Deep Archive has no expedited tier: **Bulk** takes up to 48 h
+(~$0.0025/GB, ≈ $0.06 for the whole set), **Standard** up to 12 h (~$0.02/GB). While
+restored, a temporary readable copy is billed at Standard rates (≈ $0.50/month for 22.8
+GB) until the restore expires.
+
+Consequences:
+
+- The Lambda handles this itself. On a run where a master needs copying but is archived
+  and not yet restored it calls `restore_object` (Bulk, 40 days — long enough for the next
+  monthly run) and reports `restore_requested`; if a restore is under way it reports
+  `awaiting_restore`; once the `Restore` header shows the object is available it copies.
+  A newly uploaded master is `STANDARD` for 90 days, so the monthly run normally copies it
+  directly and the restore path only carries the initial backfill and stragglers.
+- The seed script is a two-pass operation: pass 1 requests restores (and copies anything
+  already restored); pass 2, 12–48 h later, copies the rest. Copies made by the seed carry
+  the same `source-etag` metadata the Lambda writes.
+- The archive's own `videos/` prefix goes to Deep Archive after one day as well, which is
+  why `pull_curriculum_archive.sh --videos` is also a two-pass operation.
 
 ## Bucket layout
 
@@ -114,15 +140,16 @@ context.
 first runs are not spent catching up.
 
 ```bash
-./scripts/seed_curriculum_archive.sh
+./scripts/seed_curriculum_archive.sh   # pass 1: requests Deep Archive restores, copies what is ready
+./scripts/seed_curriculum_archive.sh   # pass 2, 12-48 h later: copies the restored masters
 ```
 
-Prints before/after object counts; the archive `videos/` count should equal the source
-count minus junk keys. Objects seeded by `aws s3 sync` carry no `source-etag` metadata, but
-`aws s3 sync` reproduces the source ETag when the multipart part size matches (it does for
-this bucket's CLI-uploaded masters), and the Lambda accepts an own-ETag match as in sync.
-Any object whose ETag differs is re-copied once by the Lambda, with metadata, and never
-again.
+Each pass prints before/after object counts and a tally of `copied / unchanged /
+restore_requested / awaiting_restore / failed`. The archive `videos/` count should end up
+equal to the source count minus junk keys. Copies are made with `s3api copy-object` and
+carry the same `source-etag` / `source-last-modified` / `stem` metadata the Lambda writes,
+so the Lambda's next run sees every seeded master as unchanged. (The Lambda also accepts
+an own-ETag match, so masters copied by a plain `aws s3 sync` count as in sync too.)
 
 **First manual run:**
 
@@ -152,6 +179,11 @@ otherwise. The body lists:
   normally 0 after the seed; a non-zero value means new or re-uploaded masters.
   `skipped_for_time` > 0 means the run hit the 60-second reserve; the next run continues,
   or invoke by hand to finish sooner.
+- `Source masters in Glacier/Deep Archive: restore_requested / awaiting_restore` — masters
+  that could not be copied yet. `restore_requested` > 0 means this run asked S3 to thaw
+  them (Bulk, up to 48 h) and the next run will copy them; `awaiting_restore` > 0 means a
+  restore was already under way. Persistently non-zero across months means a restore
+  expired before a run copied it — invoke by hand within 40 days of the request.
 - `Junk keys` — source keys that failed the master pattern and were not archived.
 - `Archive` — object count and total size of current versions.
 - Up to 50 keys each for missing / orphan / copied / skipped, when non-empty.
@@ -182,6 +214,7 @@ several techniques.
 
 `tests/test_curriculum_archive.py` covers the manifest (shared clip under two stems, a
 `missing_source` row, an `orphan_source` row, junk `.movv` exclusion), the copy decision
-(skip on ETag match, copy on mismatch), the time-budget stop, the SNS failure path, the
-stem rule's agreement with `file-name-decipher/utils.get_stub`, and that every file the
-Lambda uploads is actually in the package.
+(skip on ETag match, copy on mismatch), the Deep Archive restore path (request / await /
+copy-when-restored), the time-budget stop, the SNS failure path, the stem rule's agreement
+with `file-name-decipher/utils.get_stub`, and that every file the Lambda uploads is
+actually in the package.

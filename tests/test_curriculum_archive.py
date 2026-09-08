@@ -152,8 +152,13 @@ class FakeDynamoDB:
 
 
 class FakeSourceS3:
-    def __init__(self, objects):
+    """Source bucket: listing with storage class, head (Restore header), restore requests."""
+
+    def __init__(self, objects, storage_class=None, restore_headers=None):
         self._objects = objects
+        self._storage_class = storage_class or {}  # key -> class (default STANDARD)
+        self._restore = restore_headers or {}  # key -> Restore header value
+        self.restore_calls = []
 
     def get_paginator(self, name):
         assert name == "list_objects_v2"
@@ -161,11 +166,28 @@ class FakeSourceS3:
 
     def paginate(self, Bucket):
         contents = [
-            {"Key": key, "Size": size, "ETag": f'"{etag}"', "LastModified": LAST_MODIFIED}
+            {
+                "Key": key,
+                "Size": size,
+                "ETag": f'"{etag}"',
+                "LastModified": LAST_MODIFIED,
+                "StorageClass": self._storage_class.get(key, "STANDARD"),
+            }
             for key, (etag, size) in sorted(self._objects.items())
         ]
         yield {"Contents": contents[:3]}
         yield {"Contents": contents[3:]}
+
+    def head_object(self, Bucket, Key):
+        head = {"ContentLength": 1, "StorageClass": self._storage_class.get(Key, "STANDARD")}
+        if Key in self._restore:
+            head["Restore"] = self._restore[Key]
+        return head
+
+    def restore_object(self, **kwargs):
+        self.restore_calls.append(kwargs)
+        if self._restore.get(kwargs["Key"], "").startswith('ongoing-request="true"'):
+            raise ClientError({"Error": {"Code": "RestoreAlreadyInProgress"}}, "RestoreObject")
 
 
 def _not_found():
@@ -361,12 +383,24 @@ def test_json_default_converts_decimals(app):
 # ---------------------------------------------------------------------------
 
 
-def _source(app, key, etag, size=1):
-    return app.SourceObject(key=key, stem=key[:-4], size=size, etag=etag, last_modified="lm")
+def _source(app, key, etag, size=1, storage_class="STANDARD"):
+    return app.SourceObject(
+        key=key,
+        stem=key[:-4],
+        size=size,
+        etag=etag,
+        last_modified="lm",
+        storage_class=storage_class,
+    )
+
+
+def _sync(app, archive, index, remaining=lambda: 900_000, source_s3=None):
+    return app.sync_videos(
+        source_s3 or FakeSourceS3({}), archive, app.load_settings(), index, remaining
+    )
 
 
 def test_sync_skips_on_metadata_etag_match_and_copies_on_mismatch(app):
-    settings = app.load_settings()
     archive = FakeArchiveS3(
         {
             "videos/same.mov": {"Body": b"x", "ETag": "other", "Metadata": {"source-etag": "e1"}},
@@ -382,7 +416,7 @@ def test_sync_skips_on_metadata_etag_match_and_copies_on_mismatch(app):
         "changed": _source(app, "changed.mov", "e2"),
         "new": _source(app, "new.mov", "e3"),
     }
-    result = app.sync_videos(archive, settings, index, lambda: 900_000)
+    result = _sync(app, archive, index)
     assert result.copied == ["changed.mov", "new.mov"]
     assert result.unchanged == 1
     assert result.skipped_for_time == []
@@ -399,31 +433,72 @@ def test_sync_skips_on_metadata_etag_match_and_copies_on_mismatch(app):
 
 def test_sync_accepts_own_etag_match_for_seeded_objects(app):
     """Objects seeded by `aws s3 sync` carry no metadata but reproduce the source ETag."""
-    settings = app.load_settings()
     archive = FakeArchiveS3({"videos/seeded.mov": {"Body": b"x", "ETag": "e1", "Metadata": {}}})
-    result = app.sync_videos(
-        archive, settings, {"seeded": _source(app, "seeded.mov", "e1")}, lambda: 900_000
-    )
+    result = _sync(app, archive, {"seeded": _source(app, "seeded.mov", "e1")})
     assert result.unchanged == 1 and result.copied == [] and archive.copy_calls == []
 
 
 def test_sync_stops_at_time_budget_and_records_skipped(app):
-    settings = app.load_settings()
     archive = FakeArchiveS3()
     index = {k[:-4]: _source(app, k, "e") for k in ("a.mov", "b.mov", "c.mov", "d.mov")}
     budget = iter([500_000, 500_000, 30_000])  # third check is under the 60 s reserve
-    result = app.sync_videos(archive, settings, index, lambda: next(budget))
+    result = _sync(app, archive, index, remaining=lambda: next(budget))
     assert result.copied == ["a.mov", "b.mov"]
     assert result.skipped_for_time == ["c.mov", "d.mov"]
     assert "videos/c.mov" not in archive.objects
 
 
 def test_sync_reraises_non_404_head_errors(app):
-    settings = app.load_settings()
     archive = MagicMock()
     archive.head_object.side_effect = ClientError({"Error": {"Code": "403"}}, "HeadObject")
     with pytest.raises(ClientError):
-        app.sync_videos(archive, settings, {"a": _source(app, "a.mov", "e")}, lambda: 900_000)
+        _sync(app, archive, {"a": _source(app, "a.mov", "e")})
+
+
+def test_sync_requests_restore_for_deep_archive_sources_and_copies_when_restored(app):
+    """Archived masters: no Restore header -> Bulk restore requested; in progress -> awaited;
+    completed -> copied. STANDARD masters copy directly."""
+    index = {
+        "cold": _source(app, "cold.mov", "e1", storage_class="DEEP_ARCHIVE"),
+        "thawing": _source(app, "thawing.mov", "e2", storage_class="GLACIER"),
+        "thawed": _source(app, "thawed.mov", "e3", storage_class="DEEP_ARCHIVE"),
+        "warm": _source(app, "warm.mov", "e4"),
+    }
+    source_s3 = FakeSourceS3(
+        {},
+        restore_headers={
+            "thawing.mov": 'ongoing-request="true"',
+            "thawed.mov": 'ongoing-request="false", expiry-date="Fri, 17 Oct 2026 00:00:00 GMT"',
+        },
+    )
+    archive = FakeArchiveS3()
+    result = _sync(app, archive, index, source_s3=source_s3)
+    assert result.restore_requested == ["cold.mov"]
+    assert result.awaiting_restore == ["thawing.mov"]
+    assert result.copied == ["thawed.mov", "warm.mov"]
+    assert [c["Key"] for c in source_s3.restore_calls] == ["cold.mov"]
+    assert source_s3.restore_calls[0]["RestoreRequest"] == {
+        "Days": app.SOURCE_RESTORE_DAYS,
+        "GlacierJobParameters": {"Tier": "Bulk"},
+    }
+    assert "videos/cold.mov" not in archive.objects
+
+
+def test_sync_treats_restore_already_in_progress_as_awaiting(app):
+    """A racing restore request (409 RestoreAlreadyInProgress) is not an error."""
+
+    class RacingSourceS3(FakeSourceS3):
+        def head_object(self, Bucket, Key):  # restore header not visible yet
+            return {"ContentLength": 1}
+
+    source_s3 = RacingSourceS3({}, restore_headers={"x.mov": 'ongoing-request="true"'})
+    result = _sync(
+        app,
+        FakeArchiveS3(),
+        {"x": _source(app, "x.mov", "e", storage_class="DEEP_ARCHIVE")},
+        source_s3=source_s3,
+    )
+    assert result.awaiting_restore == ["x.mov"] and result.restore_requested == []
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +525,7 @@ def test_handler_writes_snapshot_and_publishes_summary(app, tmp_path):
     assert summary["orphan_source_keys"] == ["a9999z.mov"]
     assert summary["junk_keys"] == ["bi01ca.movv"]
     assert summary["videos_copied"] == 6 and summary["videos_skipped_for_time"] == 0
+    assert summary["videos_restore_requested"] == 0 and summary["videos_awaiting_restore"] == 0
     assert "bi01ca.movv" not in {c["CopySource"]["Key"] for c in archive.copy_calls}
 
     keys = set(archive.objects)
