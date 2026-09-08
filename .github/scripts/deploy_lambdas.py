@@ -109,6 +109,30 @@ def build_env_vars(config: dict, lambda_name: str) -> dict:
     return env_vars
 
 
+def copy_bundle_files(lambda_dir: Path, config: dict) -> Path:
+    """Copy each repo-relative path in config `bundle_files` into <lambda_dir>/bundle/.
+
+    Lets a Lambda ship files that live elsewhere in the repo (e.g. docs) without keeping a
+    drifting copy next to app.py. Returns the bundle dir (removed again after zipping).
+    Fails the deploy if a listed file is missing so a broken package never ships silently.
+    """
+    bundle_dest = lambda_dir / "bundle"
+    if bundle_dest.exists():
+        shutil.rmtree(bundle_dest)
+    bundle_files = config.get("bundle_files", [])
+    if not bundle_files:
+        return bundle_dest
+    bundle_dest.mkdir()
+    for rel_path in bundle_files:
+        src = REPO_ROOT / rel_path
+        if not src.is_file():
+            print(f"  ERROR: bundle_files entry not found: {rel_path}")
+            sys.exit(1)
+        shutil.copy2(src, bundle_dest / src.name)
+        print(f"  Bundled {rel_path} -> bundle/{src.name}")
+    return bundle_dest
+
+
 def deploy_lambda(lambda_dir: Path):
     print(f"\n{'=' * 60}\nDeploying: {lambda_dir.name}\n{'=' * 60}")
     original_cwd = Path.cwd()
@@ -164,15 +188,20 @@ def deploy_lambda(lambda_dir: Path):
             shutil.copytree(COMMON_DIR, common_dest)
             print("  Copied common/ into lambda dir")
 
+        # Copy config.json `bundle_files` (repo-relative) into <lambda>/bundle/ for the zip
+        bundle_dest = copy_bundle_files(lambda_dir, config)
+
         zip_path = REPO_ROOT / f"{lambda_dir.name}.zip"
         exclude = config.get("exclude_files", ["*.pyc", "__pycache__/*", "tests/**"])
         exclude_args = " ".join(f"-x '{pattern}'" for pattern in exclude)
         print("  Packaging code into zip...")
         run(f"zip -r {zip_path} . {exclude_args} > /dev/null")
 
-        # Remove common/ from lambda dir (cleanup; don't leave it in the repo)
+        # Remove common/ and bundle/ from lambda dir (cleanup; don't leave them in the repo)
         if common_dest.exists():
             shutil.rmtree(common_dest)
+        if bundle_dest.exists():
+            shutil.rmtree(bundle_dest)
 
         env_vars = build_env_vars(config, lambda_dir.name)
         # cognito-backup always backs up all user pools in the region; never pass a single pool ID

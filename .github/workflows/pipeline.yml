@@ -184,6 +184,10 @@ jobs:
           CONTRIBUTOR_SUBMISSIONS_BUCKET: ${{ secrets.CONTRIBUTOR_SUBMISSIONS_BUCKET }}
           APPROVED_FOR_TRANSCODING_BUCKET: ${{ secrets.APPROVED_FOR_TRANSCODING_BUCKET }}
           CURRICULUM_SITE_URL: ${{ secrets.CURRICULUM_SITE_URL }}
+          SOURCE_VIDEO_BUCKET: ${{ secrets.SOURCE_VIDEO_BUCKET }}
+          ARCHIVE_BUCKET: ${{ secrets.ARCHIVE_BUCKET }}
+          ARCHIVE_BUCKET_REGION: ${{ secrets.ARCHIVE_BUCKET_REGION }}
+          DEPLOYED_GIT_SHA: ${{ github.sha }}
         run: python .github/scripts/deploy_lambdas.py
 
       - name: Setup Lambda Triggers

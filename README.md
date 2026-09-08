@@ -77,6 +77,7 @@ This repo contains five Lambdas that power the Suigetsukan curriculum platform: 
 
 - **Script:** [scripts/setup_aws_backup_dynamodb.py](scripts/setup_aws_backup_dynamodb.py)
 - **CloudFormation (IaC):** [infra/aws-backup-dynamodb.yaml](infra/aws-backup-dynamodb.yaml) — `aws cloudformation deploy --template-file infra/aws-backup-dynamodb.yaml --stack-name suigetsukan-ddb-backup --capabilities CAPABILITY_NAMED_IAM --region us-west-1 --profile tennis@suigetsukan`
+- **Curriculum archive bucket (IaC, deploy once, us-west-2):** [infra/archive-bucket.yaml](infra/archive-bucket.yaml) — versioned, Object Lock Governance 1 year, `videos/` → Deep Archive — `aws cloudformation deploy --template-file infra/archive-bucket.yaml --stack-name suigetsukan-curriculum-archive --region us-west-2 --profile tennis@suigetsukan`. Written to by the curriculum-archive Lambda; see [docs/CURRICULUM_ARCHIVE.md](docs/CURRICULUM_ARCHIVE.md).
 
 See [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md).
 
@@ -99,6 +100,27 @@ See [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md).
 | Runtime       | Python 3.12                    |
 | Timeout       | 300 s                          |
 | Event source  | EventBridge `cron(0 3 * * ? *)` (daily 3 AM UTC) |
+
+---
+
+### curriculum-archive
+
+**Purpose:** Monthly **catastrophic-failure backup** of the curriculum: every source video master, the three curriculum DynamoDB tables, a manifest mapping every video to art / scroll / technique / variation, and the docs needed to read it with no AWS account — in a versioned, Object-Locked bucket in **us-west-2** (the running system is in us-west-1). See [docs/CURRICULUM_ARCHIVE.md](docs/CURRICULUM_ARCHIVE.md).
+
+**Invocation:** EventBridge schedule (**monthly**, 1st at 04:00 UTC, `cron(0 4 1 * ? *)`). Can also be invoked manually.
+
+**Behavior:** Scans the three tables → `snapshots/<date>/tables/<art>.json.gz`; joins each technique's variations with the source-video listing → `snapshots/<date>/manifest.{csv,json}` with `mapped` / `missing_source` / `orphan_source` status per row; uploads `RESTORE.md`, the technique-to-filename reference and the mapping modules to `snapshots/<date>/docs/`; server-side cross-region copies new/changed masters to `videos/` (never deletes; stops at 60 s remaining and continues next run); verifies with `head_object`; publishes an SNS summary (failure → SNS + re-raise). `snapshots/latest/` is the pointer for restores. Seed once with `scripts/seed_curriculum_archive.sh`; pull with `scripts/pull_curriculum_archive.sh <dir> [--videos]`.
+
+**Key env:** `AWS_DDB_AIKIDO_TABLE_NAME`, `AWS_DDB_BATTODO_TABLE_NAME`, `AWS_DDB_DANZAN_RYU_TABLE_NAME`, `SOURCE_VIDEO_BUCKET`, `ARCHIVE_BUCKET`, `ARCHIVE_BUCKET_REGION`; optional `SNS_SUPPORT_TOPIC_ARN`, `DEPLOYED_GIT_SHA` (set by the pipeline).
+
+| Config        | Value                              |
+|---------------|-------------------------------------|
+| Function name | `suigetsukan-curriculum-archive`   |
+| Handler       | `app.lambda_handler`               |
+| Runtime       | Python 3.12                        |
+| Timeout       | 900 s                              |
+| Memory        | 512 MB                             |
+| Event source  | EventBridge `cron(0 4 1 * ? *)` (monthly) |
 
 ---
 
@@ -134,6 +156,7 @@ File naming rules and patterns are documented in [docs/FILE_NAMING_CONVENTIONS.m
 | cognito-rest-api         | API Gateway    | Admin: approve, promote, deny, delete users |
 | cognito-backup           | EventBridge    | Export Cognito users/groups to S3 (daily); validate backup, manifest, metrics |
 | file-name-decipher       | SNS            | Map video URLs → curriculum DynamoDB tables |
+| curriculum-archive       | EventBridge    | Monthly cross-region archive: masters + tables + technique manifest + docs |
 
 DynamoDB backup is handled by **AWS Backup** (us-west-1, weekly, 1-year retention); see setup script and docs.
 
@@ -219,3 +242,4 @@ Convenience: after committing, run `./scripts/test_then_push.sh` to run tests an
 - [docs/CODING_GUIDELINES.md](docs/CODING_GUIDELINES.md) — style and tooling.
 - [docs/FILE_NAMING_CONVENTIONS.md](docs/FILE_NAMING_CONVENTIONS.md) — file-name-decipher input naming by art.
 - [docs/SECRETS_AND_ENV_VARS.md](docs/SECRETS_AND_ENV_VARS.md) — secrets and environment variables.
+- [docs/CURRICULUM_ARCHIVE.md](docs/CURRICULUM_ARCHIVE.md) — monthly cross-region curriculum archive (bucket, Lambda, seed/pull scripts, reading the summary).

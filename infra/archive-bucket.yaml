@@ -1,0 +1,137 @@
+# Curriculum archive bucket (Suigetsukan)
+# Deploy ONCE, in us-west-2 on purpose: the running system (tables, source/HLS buckets)
+# lives in us-west-1, and this bucket is the second copy that survives a regional or
+# account-level failure of the primary. Written to monthly by the
+# suigetsukan-curriculum-archive Lambda (lambdas/curriculum-archive/); seeded by
+# scripts/seed_curriculum_archive.sh; pulled to a local drive by
+# scripts/pull_curriculum_archive.sh. See docs/CURRICULUM_ARCHIVE.md.
+#
+# Deploy: aws cloudformation deploy --template-file infra/archive-bucket.yaml \
+#          --stack-name suigetsukan-curriculum-archive \
+#          --region us-west-2 --profile tennis@suigetsukan
+#
+# Object Lock (Governance, 1 year default retention) is what makes the archive survive a
+# compromised key or a fat-fingered `rm`: no principal without s3:BypassGovernanceRetention
+# can delete or overwrite a locked object version. NOTE: Object Lock can only be enabled
+# at bucket creation; it cannot be added to an existing bucket by a stack update, and the
+# bucket carries DeletionPolicy: Retain so a stack delete never removes the archive.
+#
+# Lifecycle: videos/ moves to DEEP_ARCHIVE after 1 day (~$0.02/month for 22.8 GB);
+# snapshots/ (tables, manifest, docs) stays instantly readable in STANDARD and old
+# versions of the overwritten snapshots/latest/ pointer expire after 400 days (longer than
+# the 365-day lock, so lifecycle never fights Object Lock).
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Cross-region, Object-Locked archive of the Suigetsukan curriculum videos, tables, and technique manifest."
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: suigetsukan-curriculum-archive
+    Description: Name of the archive bucket (referenced by the ARCHIVE_BUCKET secret).
+  DefaultRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 1
+    Description: Object Lock default retention (Governance mode) applied to every new object version.
+  VideoDeepArchiveAfterDays:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    Description: Days before objects under videos/ transition to DEEP_ARCHIVE.
+  SnapshotNoncurrentExpireDays:
+    Type: Number
+    Default: 400
+    MinValue: 1
+    Description: Days after which noncurrent versions under snapshots/ expire (must exceed DefaultRetentionDays).
+
+Resources:
+  ArchiveBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: !Ref DefaultRetentionDays
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: videos-to-deep-archive
+            Status: Enabled
+            Prefix: videos/
+            Transitions:
+              - StorageClass: DEEP_ARCHIVE
+                TransitionInDays: !Ref VideoDeepArchiveAfterDays
+            NoncurrentVersionTransitions:
+              - StorageClass: DEEP_ARCHIVE
+                TransitionInDays: !Ref VideoDeepArchiveAfterDays
+          - Id: snapshots-expire-noncurrent
+            Status: Enabled
+            Prefix: snapshots/
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref SnapshotNoncurrentExpireDays
+          - Id: abort-incomplete-multipart
+            Status: Enabled
+            Prefix: ""
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: Project
+          Value: suigetsukan-curriculum
+        - Key: Environment
+          Value: prod
+        - Key: Purpose
+          Value: curriculum-archive
+
+  ArchiveBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArchiveBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Speed bump against an accidental or malicious bucket deletion: the policy itself
+          # must be removed first, which is a separate, deliberate action.
+          - Sid: DenyDeleteBucket
+            Effect: Deny
+            Principal: "*"
+            Action: s3:DeleteBucket
+            Resource: !GetAtt ArchiveBucket.Arn
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt ArchiveBucket.Arn
+              - !Sub "${ArchiveBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+Outputs:
+  ArchiveBucketName:
+    Description: Archive bucket name (set this as the ARCHIVE_BUCKET GitHub secret)
+    Value: !Ref ArchiveBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketName"
+  ArchiveBucketArn:
+    Description: Archive bucket ARN
+    Value: !GetAtt ArchiveBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketArn"
