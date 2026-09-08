@@ -33,7 +33,10 @@ Add these to your GitHub repository secrets (Settings → Secrets and variables 
 | `AWS_DDB_DANZAN_RYU_TABLE_NAME` | DynamoDB table for Danzan Ryu curriculum | file-name-decipher |
 | `CORS_ALLOWED_ORIGIN` | Restrict CORS origin (optional; default `*`) | cognito-rest-api, billing-rest-api |
 | `AWS_S3_BACKUP_BUCKET` | S3 bucket for Cognito backups (must exist). Retention via **S3 lifecycle only**: add rule for prefix `backups/`, expire after 365 days | cognito-backup |
-| `SNS_SUPPORT_TOPIC_ARN` | SNS topic for Cognito backup failure alerts (optional) | cognito-backup |
+| `SNS_SUPPORT_TOPIC_ARN` | SNS topic for Cognito backup failure alerts (optional); also the curriculum-archive success/failure summary | cognito-backup, curriculum-archive |
+| `SOURCE_VIDEO_BUCKET` | Source video master bucket (us-west-1, `<stem>.mov` keys) | curriculum-archive |
+| `ARCHIVE_BUCKET` | Curriculum archive bucket created by `infra/archive-bucket.yaml` | curriculum-archive |
+| `ARCHIVE_BUCKET_REGION` | Region of `ARCHIVE_BUCKET` (`us-west-2`) | curriculum-archive |
 
 ---
 
@@ -68,6 +71,15 @@ DynamoDB is backed up by **AWS Backup** in **us-west-1**: **all** tables in the 
 - `SNS_SUPPORT_TOPIC_ARN` (optional) — ARN of SNS topic for error notifications on backup failure.
 
 No passwords are exported; restore requires users to reset password or use invite flow.
+
+### curriculum-archive
+- `AWS_DDB_AIKIDO_TABLE_NAME`, `AWS_DDB_BATTODO_TABLE_NAME`, `AWS_DDB_DANZAN_RYU_TABLE_NAME` — same secrets as file-name-decipher.
+- `SOURCE_VIDEO_BUCKET` — us-west-1 bucket holding the `<stem>.mov` masters.
+- `ARCHIVE_BUCKET` / `ARCHIVE_BUCKET_REGION` — the Object-Locked archive bucket in **us-west-2** (deploy `infra/archive-bucket.yaml` first).
+- `SNS_SUPPORT_TOPIC_ARN` (optional) — monthly summary and failure alerts.
+- `DEPLOYED_GIT_SHA` — not a secret; `pipeline.yml` passes `github.sha` so the snapshot's `VERSION` file records the deployed commit.
+
+See [CURRICULUM_ARCHIVE.md](CURRICULUM_ARCHIVE.md).
 
 ---
 

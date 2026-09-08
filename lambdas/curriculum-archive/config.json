@@ -1,0 +1,32 @@
+{
+  "function_name_suffix": "curriculum-archive",
+  "function_name": "suigetsukan-curriculum-archive",
+  "handler": "app.lambda_handler",
+  "runtime": "python3.12",
+  "timeout": 900,
+  "memory_size": 512,
+  "env_vars": {
+    "AWS_DDB_AIKIDO_TABLE_NAME": "placeholder",
+    "AWS_DDB_BATTODO_TABLE_NAME": "placeholder",
+    "AWS_DDB_DANZAN_RYU_TABLE_NAME": "placeholder",
+    "SOURCE_VIDEO_BUCKET": "placeholder",
+    "ARCHIVE_BUCKET": "placeholder",
+    "ARCHIVE_BUCKET_REGION": "us-west-2",
+    "SNS_SUPPORT_TOPIC_ARN": "optional",
+    "DEPLOYED_GIT_SHA": "optional"
+  },
+  "optional_env_vars": ["SNS_SUPPORT_TOPIC_ARN", "DEPLOYED_GIT_SHA", "ARCHIVE_BUCKET_REGION"],
+  "bundle_files": ["docs/TECHNIQUE_TO_FILENAME_REFERENCE.md"],
+  "layers": [],
+  "tags": {"Project": "suigetsukan-curriculum", "Environment": "prod"},
+  "role_name": "suigetsukan-curriculum-archive-role",
+  "exclude_files": ["*.pyc", "__pycache__/*", "tests/**"],
+  "event_sources": [
+    {
+      "type": "eventbridge",
+      "arn": "default",
+      "schedule_expression": "cron(0 4 1 * ? *)",
+      "rule_name": "suigetsukan-curriculum-archive-Schedule"
+    }
+  ]
+}
